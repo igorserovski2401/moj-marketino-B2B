@@ -31,6 +31,52 @@ _FX_TO_EUR: dict[str, float] = {
     "HRK": 1 / 7.534,  # historisch, Kroatien ist seit 2023 EUR
 }
 
+# ── Retailer-Normalisierung ───────────────────────────────────────────────────
+
+_RETAILER_ALIASES: dict[str, str] = {
+    "BIPA": "BIPA",
+    "DM": "dm",
+    "DM DROGERIE": "dm",
+    "KONZUM": "Konzum",
+    "KONZUM SUPER": "Konzum",
+    "KAUFLAND": "Kaufland",
+    "LIDL": "Lidl",
+    "LIDL HRVATSKA": "Lidl",
+    "SPAR": "Spar",
+    "SPAR SUPERMARKET": "Spar",
+    "INTERSPAR": "Interspar",
+    "EUROSPAR": "Eurospar",
+    "MAXI": "Maxi",
+    "RODA": "Roda",
+    "IDEA": "Idea",
+    "SUPERKITGO": "Superkitgo",
+    "TINEX": "Tinex",
+    "VERO": "Vero",
+    "STOKOMAK": "Stokomak",
+    "BINGO": "Bingo",
+    "VOLI": "Voli",
+    "PLODINE": "Plodine",
+    "MERCATOR": "Mercator",
+    "TUŠ": "Tus",
+    "TUS": "Tus",
+    "JAGER": "Jager",
+    "E.LECLERC": "E.Leclerc",
+    "E. LECLERC": "E.Leclerc",
+    "DIS": "Dis",
+}
+
+
+def normalize_retailer_name(name: str) -> str:
+    """Normiert Händlernamen: strip + Alias-Auflösung für Duplikat-Dedup.
+
+    Beispiel: 'BIPA' und 'bipa' → 'BIPA'; 'Lidl Hrvatska' → 'Lidl'.
+    """
+    if not name:
+        return ""
+    key = name.strip().upper()
+    return _RETAILER_ALIASES.get(key, name.strip())
+
+
 # Länder-Namen-Map
 COUNTRY_NAMES: dict[str, str] = {
     "HR": "Kroatien 🇭🇷",

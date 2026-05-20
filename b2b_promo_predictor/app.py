@@ -33,7 +33,7 @@ from src.database import (
     to_feature_df,
 )
 from src.features import create_features
-from src.matching import ProductMatcher
+from src.matching import MIN_MATCH_SCORE, UNKNOWN_MASTER_PRODUCT, ProductMatcher
 from src.model import forecast_price_trend, get_feature_importance, predict, train_lgbm
 
 # ── Lokalisierung ─────────────────────────────────────────────────────────────
@@ -93,6 +93,9 @@ def cat_de(name: str | None) -> str:
     return CATEGORY_DE.get(name, name)
 
 
+MAX_CALENDAR_ROWS = 500
+
+
 def _apply_quality(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Führt Quality Pipeline aus und gibt bereinigte Daten + Stats zurück."""
     if df.empty:
@@ -100,6 +103,41 @@ def _apply_quality(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
                     "n_price_swapped": 0, "n_excluded": 0, "n_clean": 0}
     clean, report = run_quality_pipeline(df)
     return clean, report._asdict()
+
+
+def build_clean_view_df(
+    raw_df: pd.DataFrame,
+    country: str | None = None,
+    category: str | None = None,
+    retailer: str | None = None,
+    brand_search: str = "",
+    limit: int | None = None,
+) -> pd.DataFrame:
+    """Einheitliche Filter-Pipeline für alle Tabs und KPIs.
+
+    Reihenfolge: quality → country → category → retailer → brand → limit.
+    Alle Tabs verwenden diese Funktion um Konsistenz sicherzustellen.
+    """
+    if raw_df.empty:
+        return raw_df
+    df, _ = _apply_quality(raw_df)
+
+    if country and "country_code" in df.columns:
+        df = df[df["country_code"] == country]
+    if category and "category_l1" in df.columns:
+        df = df[df["category_l1"] == category]
+    if retailer and "store_name" in df.columns:
+        df = df[df["store_name"] == retailer]
+    if brand_search:
+        search_cols = [c for c in ["brand", "manufacturer", "name", "master_product"] if c in df.columns]
+        if search_cols:
+            mask = pd.Series(False, index=df.index)
+            for col in search_cols:
+                mask |= df[col].fillna("").str.contains(brand_search, case=False, regex=False)
+            df = df[mask]
+    if limit is not None:
+        df = df.head(limit)
+    return df
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -217,7 +255,14 @@ with st.sidebar:
     )
 
     with st.expander("⚙️ Erweiterte Einstellungen"):
-        match_threshold = st.slider("Match-Konfidenz", 0.50, 0.95, 0.70, 0.05)
+        match_threshold = st.slider(
+            "Match-Konfidenz (min. 85 %)",
+            min_value=MIN_MATCH_SCORE,
+            max_value=0.99,
+            value=MIN_MATCH_SCORE,
+            step=0.05,
+            help="Unterhalb dieses Schwellenwerts gilt ein Produkt als 'nicht zugeordnet'",
+        )
         kw_vorschau = st.slider("Vorschau-Wochen", 1, 8, 4)
 
     st.divider()
@@ -295,9 +340,13 @@ with tab1:
         upcoming_raw = _upcoming(sel_country, days_ahead, sel_cat)
         upcoming_df, _uq = _apply_quality(upcoming_raw)
 
-    if brand_filter and not upcoming_df.empty and "name" in upcoming_df.columns:
-        mask = upcoming_df["name"].str.contains(brand_filter, case=False, na=False)
-        upcoming_df = upcoming_df[mask]
+    if brand_filter and not upcoming_df.empty:
+        _bcols = [c for c in ["brand", "manufacturer", "name", "master_product"] if c in upcoming_df.columns]
+        if _bcols:
+            _bmask = pd.Series(False, index=upcoming_df.index)
+            for _bc in _bcols:
+                _bmask |= upcoming_df[_bc].fillna("").str.contains(brand_filter, case=False, regex=False)
+            upcoming_df = upcoming_df[_bmask]
 
     if not upcoming_df.empty:
         n_up = len(upcoming_df)
@@ -843,7 +892,7 @@ with tab3:
     st.markdown('<div class="section-header">🔗 Entity-Matching – Produktnormierung</div>', unsafe_allow_html=True)
     st.caption(
         "KI-Sprachmodell (Sentence-Transformer) ordnet rohe Händler-Produktbezeichnungen "
-        "einer normierten Master-Produktliste zu."
+        f"einer normierten Master-Produktliste zu. Mindest-Score: {match_threshold:.0%}"
     )
 
     MASTER_LIST = [
@@ -861,34 +910,58 @@ with tab3:
 
     match_sample = q_df.head(20) if not q_df.empty else _q_load(sel_country, None, None, 20).head(20)
     matcher = ProductMatcher(threshold=match_threshold)
+    raw_cats = match_sample["category_l1"].fillna("").tolist() if "category_l1" in match_sample.columns else None
 
     with st.spinner("Entity Resolution…"):
-        results = matcher.batch_match(match_sample["name"].tolist(), MASTER_LIST)
+        results = matcher.batch_match(match_sample["name"].tolist(), MASTER_LIST, raw_categories=raw_cats)
 
-    match_df = match_sample[["store_name", "name", "price", "country_code"]].copy()
+    _show_debug = st.checkbox(
+        "🔍 Nicht-zugeordnete Produkte anzeigen (Debug)",
+        value=False,
+        help="Zeigt auch Produkte mit Score < Schwellenwert oder Kategorie-Konflikt",
+    )
+
+    match_df = match_sample[[c for c in ["store_name", "name", "price", "country_code"] if c in match_sample.columns]].copy()
     match_df["master_produkt"] = [r.master_product for r in results]
     match_df["score"]          = [round(r.score, 4) for r in results]
-    match_df["konfident"]      = ["✅" if r.is_confident else "⚠️" for r in results]
+    match_df["methode"]        = [r.match_method for r in results]
+    match_df["status"]         = [r.match_status for r in results]
+    match_df["OK"]             = ["✅" if r.is_confident else "⚠️" for r in results]
 
-    match_cfg = {
-        "score": st.column_config.ProgressColumn("Score", min_value=0, max_value=1, format="%.2f"),
-    }
-    st.dataframe(
-        match_df.rename(columns={
-            "store_name": "Händler",
-            "name": "Roh-Bezeichnung",
-            "price": "Preis",
-            "country_code": "Markt",
-            "master_produkt": "→ Master-Produkt",
-            "konfident": "OK",
-        }),
-        column_config=match_cfg,
-        use_container_width=True, hide_index=True,
-    )
+    # Dashboard-Guard: zeige standardmäßig nur konfidente Matches
+    if not _show_debug:
+        match_df = match_df[match_df["status"].isin(["keyword_exact", "embedding_high_confidence"])]
+
+    if match_df.empty:
+        st.info(
+            "Keine zugeordneten Produkte im Sample. "
+            "Aktiviere 'Nicht-zugeordnete Produkte anzeigen' für Details."
+        )
+    else:
+        match_cfg = {
+            "score": st.column_config.ProgressColumn("Score", min_value=0, max_value=1, format="%.2f"),
+        }
+        st.dataframe(
+            match_df.rename(columns={
+                "store_name": "Händler",
+                "name": "Roh-Bezeichnung",
+                "price": "Preis",
+                "country_code": "Markt",
+                "master_produkt": "→ Master-Produkt",
+                "methode": "Methode",
+                "status": "Status",
+                "OK": "OK",
+            }),
+            column_config=match_cfg,
+            use_container_width=True, hide_index=True,
+        )
+
     conf_rate = sum(1 for r in results if r.is_confident) / max(len(results), 1) * 100
-    m1, m2 = st.columns(2)
+    unmatched_count = sum(1 for r in results if not r.is_confident)
+    m1, m2, m3 = st.columns(3)
     m1.metric("Match-Rate (Sample)", f"{conf_rate:.1f} %")
     m2.metric("Konfidenz-Schwelle", f"{match_threshold:.0%}")
+    m3.metric("Nicht zugeordnet", str(unmatched_count), help="Score < Schwellenwert oder Kategorie-Konflikt")
 
     st.divider()
 
@@ -897,24 +970,47 @@ with tab3:
 
     @st.cache_data(ttl=180, show_spinner=False)
     def _cal_data(country, store):
-        return load_products(country_code=country, store_name=store, limit=200)
+        return load_products(country_code=country, store_name=store, limit=500)
 
     cal_df = _cal_data(sel_country, q_store)
 
-    if not cal_df.empty and "valid_from" in cal_df.columns and "valid_until" in cal_df.columns:
-        cal_clean = cal_df.dropna(subset=["valid_from", "valid_until", "price"])
-        if not cal_clean.empty and "store_name" in cal_clean.columns:
-            cal_clean = cal_clean.sort_values("valid_from").head(60).copy()
+    if cal_df.empty:
+        st.info("Keine Kalenderdaten verfügbar.")
+    elif "valid_from" not in cal_df.columns or "valid_until" not in cal_df.columns:
+        st.info("Aktionskalender benötigt Datums-Spalten (valid_from / valid_until).")
+    else:
+        cal_clean = cal_df.dropna(subset=["valid_from", "valid_until"])
+        if cal_clean.empty:
+            st.info("Keine Aktionen mit vollständigen Datumsinformationen.")
+        elif not q_store and sel_country is None:
+            st.info(
+                "Bitte wähle einen **Händler** oder einen **Markt** um den Kalender anzuzeigen. "
+                "Ohne Filter würde der Kalender zu viele Zeilen enthalten."
+            )
+        else:
+            n_cal = len(cal_clean)
+            if n_cal > MAX_CALENDAR_ROWS:
+                st.warning(
+                    f"Kalender enthält {n_cal:,} Einträge – zeige nur die ersten {MAX_CALENDAR_ROWS}. "
+                    "Verwende den Händler-Filter für eine präzisere Ansicht."
+                )
+                cal_clean = cal_clean.sort_values("valid_from").head(MAX_CALENDAR_ROWS).copy()
+            else:
+                cal_clean = cal_clean.sort_values("valid_from").copy()
+
             if "category_l1" in cal_clean.columns:
                 cal_clean["Kategorie"] = cal_clean["category_l1"].apply(cat_de)
-            fig_gantt = px.timeline(
-                cal_clean,
-                x_start="valid_from",
-                x_end="valid_until",
-                y="store_name",
-                color="Kategorie" if "Kategorie" in cal_clean.columns else "store_name",
-                hover_name="name" if "name" in cal_clean.columns else None,
-                labels={"store_name": "Händler"},
-            )
-            fig_gantt.update_layout(margin=dict(t=20, b=10))
-            st.plotly_chart(fig_gantt, use_container_width=True)
+            if "store_name" in cal_clean.columns:
+                fig_gantt = px.timeline(
+                    cal_clean,
+                    x_start="valid_from",
+                    x_end="valid_until",
+                    y="store_name",
+                    color="Kategorie" if "Kategorie" in cal_clean.columns else "store_name",
+                    hover_name="name" if "name" in cal_clean.columns else None,
+                    labels={"store_name": "Händler"},
+                )
+                fig_gantt.update_layout(margin=dict(t=20, b=10))
+                st.plotly_chart(fig_gantt, use_container_width=True)
+            else:
+                st.info("Keine Händler-Informationen für den Kalender verfügbar.")

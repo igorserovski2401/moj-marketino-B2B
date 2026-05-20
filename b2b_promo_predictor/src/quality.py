@@ -392,3 +392,31 @@ def _validate_prices(df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
         df["discount_pct"] = np.nan
 
     return df, n_swapped, n_excluded
+
+
+# ── Preis-Validierung (Einzelzeile) ──────────────────────────────────────────
+
+def validate_promo_price(row: "pd.Series") -> str:
+    """Klassifiziert die Preisqualität einer einzelnen Zeile.
+
+    Returns:
+        "valid_discount"   – Promo < Regulär, echter Rabatt
+        "no_real_discount" – Promo ≥ Regulär (kein echtes Angebot)
+        "missing_price"    – Preis-Felder fehlen
+        "invalid_price"    – Negativer oder Null-Preis
+    """
+    p_col  = "price_eur"          if "price_eur"          in row.index else "price"
+    op_col = "original_price_eur" if "original_price_eur" in row.index else "original_price"
+
+    price    = row.get(p_col)
+    orig     = row.get(op_col)
+
+    if pd.isna(price):
+        return "missing_price"
+    if price <= 0:
+        return "invalid_price"
+    if pd.isna(orig) or orig <= 0:
+        return "missing_price"
+    if price < orig * 0.95:
+        return "valid_discount"
+    return "no_real_discount"
