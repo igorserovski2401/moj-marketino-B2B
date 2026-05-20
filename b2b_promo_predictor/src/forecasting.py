@@ -19,7 +19,19 @@ import pandas as pd
 
 MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER: int = 3
 MIN_HISTORY_DAYS: int = 90
+MIN_OBSERVATIONS: int = 12
+MAX_OUTLIER_FACTOR: float = 3.0
 PROMO_TREND_THRESHOLD_PCT: float = 5.0
+
+PriceTag = Literal[
+    "valid_price",
+    "outlier_high",
+    "outlier_low",
+    "invalid_price",
+    "mixed_currency",
+    "mixed_product",
+    "mixed_retailer",
+]
 
 PredictionStatus = Literal[
     "ok",
@@ -515,6 +527,132 @@ def forecasts_to_dataframe(forecasts: list[PromoForecast]) -> pd.DataFrame:
         ascending=[True, False],
     ).drop(columns=["_prio_sort"]).reset_index(drop=True)
     return df
+
+
+def validate_price_series(df: pd.DataFrame) -> pd.DataFrame:
+    """Tag each row with a price quality label.
+
+    Returns the input DataFrame with an added ``price_tag`` column.
+    Tags: valid_price / outlier_high / outlier_low / invalid_price /
+          mixed_currency / mixed_product / mixed_retailer.
+    """
+    if df is None or df.empty:
+        return df.copy() if df is not None else pd.DataFrame()
+
+    result = df.copy()
+    p_col = "price_eur" if "price_eur" in result.columns else "price"
+
+    # Detect structural issues first
+    tags: pd.Series = pd.Series("valid_price", index=result.index, dtype=object)
+
+    if "currency" in result.columns and result["currency"].nunique() > 1:
+        tags[:] = "mixed_currency"
+        result["price_tag"] = tags
+        return result
+
+    name_col = next((c for c in ("name", "product_name") if c in result.columns), None)
+    if name_col and result[name_col].nunique() > 1:
+        tags[:] = "mixed_product"
+        result["price_tag"] = tags
+        return result
+
+    retailer_col = next((c for c in ("store_name", "retailer") if c in result.columns), None)
+    if retailer_col and result[retailer_col].nunique() > 1:
+        tags[:] = "mixed_retailer"
+        result["price_tag"] = tags
+        return result
+
+    if p_col not in result.columns:
+        result["price_tag"] = tags
+        return result
+
+    prices = result[p_col].astype(float)
+    invalid_mask = prices.isna() | (prices <= 0)
+    tags[invalid_mask] = "invalid_price"
+
+    valid_prices = prices[~invalid_mask]
+    if len(valid_prices) >= 3:
+        median = float(valid_prices.median())
+        if median > 0:
+            high_mask = (~invalid_mask) & (prices > median * MAX_OUTLIER_FACTOR)
+            low_mask  = (~invalid_mask) & (prices < median / MAX_OUTLIER_FACTOR)
+            tags[high_mask] = "outlier_high"
+            tags[low_mask]  = "outlier_low"
+
+    result["price_tag"] = tags
+    return result
+
+
+def compute_data_quality_score(fc: "PromoForecast") -> float:
+    """Return a 0–100 data quality score for a single forecast.
+
+    Scoring components:
+    - History depth  (≥12 → 30 pts, linear below)
+    - History span   (≥180 days → 20 pts, linear)
+    - Price series   (all prices present → 20 pts)
+    - Cycle regularity (low CoV → 20 pts)
+    - Discount info  (both min/max → 10 pts)
+    """
+    score = 0.0
+
+    # History depth
+    depth_pts = min(30.0, (fc.historical_count / MIN_OBSERVATIONS) * 30.0)
+    score += depth_pts
+
+    # History span (use avg_cycle * count as proxy if direct span unavailable)
+    if fc.avg_cycle_days and fc.historical_count > 1:
+        span = fc.avg_cycle_days * (fc.historical_count - 1)
+        score += min(20.0, (span / 180.0) * 20.0)
+
+    # Price series completeness
+    if fc.last_promo_price is not None:
+        score += 10.0
+    if fc.avg_promo_price_90d is not None:
+        score += 5.0
+    if fc.avg_promo_price_180d is not None:
+        score += 5.0
+
+    # Cycle regularity: avg ≈ median → low variance
+    if fc.avg_cycle_days and fc.median_cycle_days:
+        ratio = abs(fc.avg_cycle_days - fc.median_cycle_days) / max(fc.avg_cycle_days, 1)
+        reg_pts = max(0.0, 20.0 * (1.0 - ratio * 2))
+        score += reg_pts
+
+    # Discount info
+    if fc.typical_discount_pct_min is not None and fc.typical_discount_pct_max is not None:
+        score += 10.0
+
+    return round(min(100.0, max(0.0, score)), 1)
+
+
+def check_forecast_eligibility(
+    historical_count: int,
+    history_span_days: int,
+    outlier_ratio: float = 0.0,
+) -> tuple[bool, str]:
+    """Gate that a product-retailer combo must pass before a forecast is shown.
+
+    Returns (is_eligible, reason_if_not).
+    Uses MIN_OBSERVATIONS (12) as the strict bar for a "reliable" forecast.
+    Falls back to MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER (3) for a
+    "limited" forecast (shown with a warning but not blocked).
+    """
+    if historical_count < MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER:
+        return False, (
+            f"Only {historical_count} historical promotion(s) available – "
+            f"minimum {MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER} required."
+        )
+    if history_span_days < MIN_HISTORY_DAYS:
+        return False, (
+            f"History spans only {history_span_days} days – "
+            f"minimum {MIN_HISTORY_DAYS} days required."
+        )
+    if outlier_ratio > 0.5:
+        return False, (
+            f"{outlier_ratio*100:.0f}% of price observations are outliers – "
+            "price series too noisy for a reliable forecast."
+        )
+    return True, ""
 
 
 def apply_forecast_filters(

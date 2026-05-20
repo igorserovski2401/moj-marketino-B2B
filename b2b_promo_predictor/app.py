@@ -37,68 +37,39 @@ from src.features import create_features
 from src.forecasting import (
     MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
     MIN_HISTORY_DAYS,
+    MIN_OBSERVATIONS,
     apply_forecast_filters,
     build_forecasts_from_promo_history,
+    compute_data_quality_score,
     forecasts_to_dataframe,
+    validate_price_series,
+)
+from src.i18n import (
+    DEFAULT_LANGUAGE_BY_MARKET,
+    LANG_LABELS,
+    MARKET_CURRENCY,
+    SUPPORTED_LANGS,
+    format_price,
+    get_market_currency,
+    t,
+    translate_category,
 )
 from src.matching import MIN_MATCH_SCORE, UNKNOWN_MASTER_PRODUCT, ProductMatcher
 from src.model import forecast_price_trend, get_feature_importance, predict, train_lgbm
 
-# ── Lokalisierung ─────────────────────────────────────────────────────────────
+# ── Country/category helpers ──────────────────────────────────────────────────
 
-CATEGORY_DE: dict[str, str] = {
-    "Hrana": "Lebensmittel",
-    "Piće": "Getränke",
-    "Pice": "Getränke",
-    "Kozmetika": "Kosmetik & Pflege",
-    "Kućanska kemija": "Haushaltschemie",
-    "Kucanska kemija": "Haushaltschemie",
-    "Dječja hrana": "Babynahrung",
-    "Djecja hrana": "Babynahrung",
-    "Mliječni proizvodi": "Milchprodukte",
-    "Mljekarstvo": "Milchprodukte",
-    "Mesni proizvodi": "Fleisch & Wurst",
-    "Voće i povrće": "Obst & Gemüse",
-    "Voce i povrce": "Obst & Gemüse",
-    "Zamrznuta hrana": "Tiefkühlkost",
-    "Slatkiši": "Süßwaren",
-    "Slatkisi": "Süßwaren",
-    "Pekarski proizvodi": "Backwaren",
-    "Zdravlje i ljepota": "Gesundheit & Beauty",
-    "Zdravlje": "Gesundheit",
-    "Čišćenje": "Reinigung",
-    "Ciscenje": "Reinigung",
-    "Food": "Lebensmittel",
-    "Non-Food": "Non-Food",
-    "Other": "Sonstiges",
-    "Храна": "Lebensmittel",
-    "Пијалоци": "Getränke",
-}
-
-COUNTRY_LOCAL: dict[str, str] = {
-    "HR": "Hrvatska 🇭🇷",
-    "SI": "Slovenija 🇸🇮",
-    "BA": "Bosna i Hercegovina 🇧🇦",
-    "RS": "Srbija 🇷🇸",
-    "MK": "Makedonija 🇲🇰",
-    "ME": "Crna Gora 🇲🇪",
-}
-
-COUNTRY_DE: dict[str, str] = {
-    "HR": "Kroatien 🇭🇷",
-    "SI": "Slowenien 🇸🇮",
-    "BA": "Bosnien & Herzegowina 🇧🇦",
-    "RS": "Serbien 🇷🇸",
-    "MK": "Nordmazedonien 🇲🇰",
-    "ME": "Montenegro 🇲🇪",
-}
+COUNTRY_KEYS: list[str] = ["HR", "SI", "BA", "RS", "MK", "ME"]
 
 
-def cat_de(name: str | None) -> str:
-    """Fallback-Übersetzer für Kategorien ohne category_de-Spalte."""
+def _country_label(code: str, lang: str) -> str:
+    return t(f"country.{code}", lang)
+
+
+def cat_local(name: str | None, lang: str = "EN") -> str:
     if not name:
         return "—"
-    return CATEGORY_DE.get(name, name)
+    return translate_category(name, lang)
 
 
 MAX_CALENDAR_ROWS = 500
@@ -204,12 +175,12 @@ st.markdown(
 
 with st.sidebar:
     st.markdown(
-        f"""
+        """
         <div style='text-align:center; padding:.4rem 0 .8rem;'>
           <span style='font-size:1.6rem;'>📊</span><br>
           <strong style='font-size:1.1rem; color:#111827;'>moj-marketino</strong><br>
           <span style='font-size:.78rem; color:#6B7280;'>B2B Promo Intelligence</span><br>
-          <span style='font-size:.7rem; color:#9CA3AF;'>v2.1 · Balkan Edition</span>
+          <span style='font-size:.7rem; color:#9CA3AF;'>v2.2 · Balkan Edition</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -217,75 +188,102 @@ with st.sidebar:
     st.divider()
 
     db_connected = settings.has_supabase and get_client() is not None
+    demo_mode = not db_connected
+
     if db_connected:
-        st.markdown(
-            '<span class="badge-ok">● Live-Daten aktiv</span>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<span class="badge-ok">● Live data active</span>', unsafe_allow_html=True)
         st.caption("MarketinoDATABASE · EU-Central-2")
     else:
         st.markdown(
-            '<span class="badge-warn">● Demo-Modus</span>',
+            '<span class="badge-warn">⚠ DEMO MODE – sample data only</span>',
             unsafe_allow_html=True,
         )
-        st.caption("Keine Datenbankverbindung – Demo-Daten aktiv")
+        st.caption("No database connection – no real market data shown")
 
     st.divider()
-    st.markdown("### 🔍 Filter")
 
-    country_keys   = list(COUNTRY_DE.keys())
-    country_labels = ["Alle Märkte"] + [COUNTRY_DE[k] for k in country_keys]
-    country_keys_extended = ["__all__"] + country_keys
+    # Language switcher (must be before market select so lang is available for labels)
+    lang_idx = st.selectbox(
+        "🌐 Language / Jezik",
+        range(len(SUPPORTED_LANGS)),
+        format_func=lambda i: LANG_LABELS[SUPPORTED_LANGS[i]],
+        key="ui_lang",
+    )
+    ui_lang = SUPPORTED_LANGS[lang_idx]
+
+    st.markdown(f"### 🔍 {t('sidebar.filter', ui_lang)}")
+
+    country_keys_extended = ["__all__"] + COUNTRY_KEYS
+    country_labels = [t("sidebar.all_markets", ui_lang)] + [
+        t(f"country.{k}", ui_lang) for k in COUNTRY_KEYS
+    ]
     sel_country_idx = st.selectbox(
-        "Markt / Land",
+        t("sidebar.market", ui_lang),
         range(len(country_keys_extended)),
         format_func=lambda i: country_labels[i],
     )
     sel_country = None if sel_country_idx == 0 else country_keys_extended[sel_country_idx]
 
+    # Auto-detect language from selected market if user hasn't manually changed it
+    if sel_country and ui_lang == "EN":
+        _auto_lang = DEFAULT_LANGUAGE_BY_MARKET.get(sel_country, "EN")
+        if _auto_lang != "EN":
+            st.caption(f"💡 Tip: switch language to {LANG_LABELS[_auto_lang]} for {t(f'country.{sel_country}', 'EN')}")
+
+    market_currency = get_market_currency(sel_country)
+
     @st.cache_data(ttl=600, show_spinner=False)
     def _sidebar_cats(c):
-        return ["Alle Kategorien"] + get_distinct_categories(c)
+        return [t("sidebar.all_categories", "EN")] + get_distinct_categories(c)
 
     sidebar_cats = _sidebar_cats(sel_country)
     sel_cat_idx = st.selectbox(
-        "Kategorie",
+        t("sidebar.category", ui_lang),
         range(len(sidebar_cats)),
-        format_func=lambda i: f"{sidebar_cats[i]}  ({cat_de(sidebar_cats[i])})"
-        if i > 0 else sidebar_cats[i],
+        format_func=lambda i: (
+            f"{sidebar_cats[i]}  ({translate_category(sidebar_cats[i], ui_lang)})"
+            if i > 0 else sidebar_cats[0]
+        ),
     )
     sel_cat = None if sel_cat_idx == 0 else sidebar_cats[sel_cat_idx]
 
     brand_filter = st.text_input(
-        "Marke / Hersteller",
-        placeholder="z.B. Podravka, Milka…",
-        help="Filtert Produktnamen nach diesem Begriff",
+        t("sidebar.brand", ui_lang),
+        placeholder="Podravka, Milka, Podravka…",
     )
 
-    with st.expander("⚙️ Erweiterte Einstellungen"):
+    with st.expander("⚙️ Advanced settings"):
         match_threshold = st.slider(
-            "Match-Konfidenz (min. 85 %)",
+            "Match confidence (min. 85 %)",
             min_value=MIN_MATCH_SCORE,
             max_value=0.99,
             value=MIN_MATCH_SCORE,
             step=0.05,
-            help="Unterhalb dieses Schwellenwerts gilt ein Produkt als 'nicht zugeordnet'",
         )
-        kw_vorschau = st.slider("Vorschau-Wochen", 1, 8, 4)
+        kw_vorschau = st.slider("Preview weeks", 1, 8, 4)
 
     st.divider()
     st.caption("© 2026 moj-marketino GmbH")
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-market_label = COUNTRY_DE.get(sel_country, "Alle Märkte") if sel_country else "Alle Märkte"
+market_label = t(f"country.{sel_country}", ui_lang) if sel_country else t("sidebar.all_markets", ui_lang)
+
+# Demo mode banner – prominent, impossible to miss
+if demo_mode:
+    st.warning(
+        "⚠️ **DEMO MODE** – This dashboard is running on sample data only. "
+        "No real market data is displayed. Connect a Supabase database to activate live data.",
+        icon="⚠️",
+    )
+
 st.markdown(
     f"""
     <h1 style='margin-bottom:.1rem; font-size:1.7rem; font-weight:800; color:#111827;'>
-      📊 Promo Intelligence Platform
+      📊 {t('app.title', ui_lang)}
     </h1>
     <p style='color:#6B7280; margin-top:.1rem; font-size:.92rem;'>
-      Intelligente Promotionsvorschau für den Balkanmarkt · Markt: <strong>{market_label}</strong>
+      {t('app.subtitle', ui_lang)} · {t('sidebar.market', ui_lang)}: <strong>{market_label}</strong>
     </p>
     """,
     unsafe_allow_html=True,
@@ -321,9 +319,9 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
 tab1, tab2, tab3 = st.tabs([
-    "🔮 Promotion Predictor",
-    "📉 Preisanalyse & Wettbewerb",
-    "⚙️ Datenqualität & Pipeline",
+    t("tab.predictor", ui_lang),
+    t("tab.price", ui_lang),
+    t("tab.quality", ui_lang),
 ])
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -337,13 +335,13 @@ with tab1:
     # │  TEIL 1 · KAM-Forecast (regelbasiert, historiengestützt)              │
     # ╰────────────────────────────────────────────────────────────────────────╯
     st.markdown(
-        '<div class="section-header">🎯 KAM-Aktionsvorhersage</div>',
+        f'<div class="section-header">🎯 {t("kam.title", ui_lang)}</div>',
         unsafe_allow_html=True,
     )
     st.caption(
-        f"Regelbasierte Prognose aus historischen Aktionszyklen · "
-        f"Mindestens {MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER} Aktionen "
-        f"und {MIN_HISTORY_DAYS} Tage Historie pro Produkt-Händler-Kombination."
+        t("kam.min_req", ui_lang,
+          n=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
+          d=MIN_HISTORY_DAYS)
     )
 
     # ── Filterleiste ─────────────────────────────────────────────────────────
@@ -351,53 +349,54 @@ with tab1:
         fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 2])
         with fc1:
             product_query = st.text_input(
-                "Produkt / Suchbegriff",
+                t("kam.product_search", ui_lang),
                 value="",
-                placeholder="z.B. Milka, Coca-Cola, Red Bull…",
+                placeholder="Milka, Coca-Cola, Red Bull…",
                 key="kam_product_query",
             )
         with fc2:
             @st.cache_data(ttl=600, show_spinner=False)
             def _fc_stores(c):
-                return ["Alle Händler"] + get_distinct_stores(c)
+                return [t("kam.all_retailers", "EN")] + get_distinct_stores(c)
             fc_stores = _fc_stores(sel_country)
             fc_store_idx = st.selectbox(
-                "Händler", range(len(fc_stores)),
+                t("kam.retailer", ui_lang), range(len(fc_stores)),
                 format_func=lambda i: fc_stores[i], key="kam_store",
             )
             fc_retailer = None if fc_store_idx == 0 else fc_stores[fc_store_idx]
         with fc3:
             min_probability = st.slider(
-                "Mindest-Wahrscheinlichkeit",
+                t("kam.min_probability", ui_lang),
                 0.0, 0.95, 0.50, 0.05, key="kam_min_prob",
             )
         with fc4:
             pred_window = st.slider(
-                "Prognose-Zeitraum (Tage)",
+                t("kam.prediction_window", ui_lang),
                 7, 90, 30, 7, key="kam_pred_window",
             )
 
-        with st.expander("⚙️ Erweiterte Forecast-Filter"):
+        with st.expander("⚙️ Advanced forecast filters"):
             ac1, ac2, ac3, ac4 = st.columns(4)
             with ac1:
+                _signal_options_raw = ["Alle", "Hoch relevant", "Beobachten", "Normal"]
                 sel_signal = st.selectbox(
-                    "Signal",
-                    ["Alle", "Hoch relevant", "Beobachten", "Normal"],
+                    t("kam.signal", ui_lang),
+                    _signal_options_raw,
                     key="kam_signal",
                 )
             with ac2:
                 sel_trend = st.selectbox(
-                    "Preis-Tendenz",
+                    t("kam.price_trend", ui_lang),
                     ["Alle", "steigend", "fallend", "stabil", "unbekannt"],
                     key="kam_trend",
                 )
             with ac3:
                 only_future = st.checkbox(
-                    "Nur zukünftige Aktionen", value=True, key="kam_only_future",
+                    t("kam.only_future", ui_lang), value=True, key="kam_only_future",
                 )
             with ac4:
                 only_sufficient = st.checkbox(
-                    "Nur Produkte mit ausreichender Historie",
+                    t("kam.only_sufficient", ui_lang),
                     value=True, key="kam_only_sufficient",
                 )
 
@@ -464,11 +463,11 @@ with tab1:
         avg_disc = fc_df["typical_discount_pct_max"].dropna().mean()
 
     kk1, kk2, kk3, kk4, kk5 = st.columns(5)
-    kk1.metric("Hoch relevante Prognosen", str(n_high))
-    kk2.metric("Steigende Preis-Tendenz", str(n_rising))
-    kk3.metric("Überfällige Aktionen", str(n_overdue))
-    kk4.metric("Forecast-Basis", f"{len(fc_df_all)}", help="Produkt-Händler-Kombinationen mit ausreichender Historie")
-    kk5.metric("Ø erwarteter Rabatt", f"{avg_disc:.0f} %" if pd.notna(avg_disc) else "—")
+    kk1.metric(t("kpi.high_signal", ui_lang), str(n_high))
+    kk2.metric(t("kpi.rising_price", ui_lang), str(n_rising))
+    kk3.metric(t("kpi.overdue", ui_lang), str(n_overdue))
+    kk4.metric(t("kpi.forecast_base", ui_lang), f"{len(fc_df_all)}")
+    kk5.metric(t("kpi.avg_discount", ui_lang), f"{avg_disc:.0f} %" if pd.notna(avg_disc) else "—")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -496,17 +495,30 @@ with tab1:
             e_str = e.strftime("%d.%m.%Y") if hasattr(e, "strftime") else str(e)
             return f"{s_str} – {e_str}"
 
+        _trend_labels = {
+            "steigend": t("trend.rising", ui_lang),
+            "fallend":  t("trend.falling", ui_lang),
+            "stabil":   t("trend.stable", ui_lang),
+            "unbekannt": t("trend.unknown", ui_lang),
+        }
+
         def _fmt_trend(row):
-            t = row.get("price_trend") or "unbekannt"
+            raw = row.get("price_trend") or "unbekannt"
             pct = row.get("price_trend_pct")
-            if t == "unbekannt" or pct is None:
-                return t
-            arrow = "▲" if t == "steigend" else ("▼" if t == "fallend" else "→")
-            return f"{arrow} {t} ({pct:+.1f} %)"
+            label = _trend_labels.get(raw, raw)
+            if raw == "unbekannt" or pct is None:
+                return label
+            arrow = "▲" if raw == "steigend" else ("▼" if raw == "fallend" else "→")
+            return f"{arrow} {label} ({pct:+.1f} %)"
+
+        _days_label = t("general.days", ui_lang)
+        _median_label = t("general.median", ui_lang)
 
         def _fmt_last_promo(row):
             d = row.get("days_since_last_promo")
-            return f"vor {d} Tagen" if d is not None else "—"
+            if d is None:
+                return "—"
+            return t("general.days_ago", ui_lang, d=d)
 
         def _fmt_cycle(row):
             avg = row.get("avg_cycle_days")
@@ -514,56 +526,69 @@ with tab1:
             if avg is None and med is None:
                 return "—"
             if med is not None:
-                return f"{med} Tage (Median)"
-            return f"{avg} Tage (Ø)"
+                return f"{med} {_days_label} ({_median_label})"
+            return f"{avg} {_days_label} (Ø)"
+
+        _cur_sym = "€" if market_currency == "EUR" else market_currency
 
         def _signal_emoji(s: str) -> str:
-            return {
-                "Hoch relevant": "🔴 Hoch relevant",
-                "Beobachten":    "🟡 Beobachten",
-                "Normal":        "🟢 Normal",
-                "Nicht belastbar": "⚪ Nicht belastbar",
-                "Ungültig":      "⚫ Ungültig",
-            }.get(s, s)
+            _map = {
+                "Hoch relevant":   t("signal.high", ui_lang),
+                "Beobachten":      t("signal.watch", ui_lang),
+                "Normal":          t("signal.normal", ui_lang),
+                "Nicht belastbar": t("signal.unreliable", ui_lang),
+                "Ungültig":        t("signal.invalid", ui_lang),
+            }
+            return _map.get(s, s)
 
         display = fc_df.copy()
-        display["Aktionszeitraum"] = display.apply(_fmt_period, axis=1)
-        display["Preis-Tendenz"]   = display.apply(_fmt_trend, axis=1)
-        display["Letzte Aktion"]   = display.apply(_fmt_last_promo, axis=1)
-        display["Ø Zyklus"]        = display.apply(_fmt_cycle, axis=1)
-        display["Signal"]          = display["signal"].apply(_signal_emoji)
-        display["Wahrscheinlichkeit"] = (display["probability"] * 100).round(0)
+        display[t("col.period", ui_lang)]      = display.apply(_fmt_period, axis=1)
+        display[t("kam.price_trend", ui_lang)] = display.apply(_fmt_trend, axis=1)
+        display[t("col.last_promo", ui_lang)]  = display.apply(_fmt_last_promo, axis=1)
+        display[t("col.cycle", ui_lang)]       = display.apply(_fmt_cycle, axis=1)
+        display[t("kam.signal", ui_lang)]      = display["signal"].apply(_signal_emoji)
+        display[t("col.probability", ui_lang)] = (display["probability"] * 100).round(0)
+
+        _period_col   = t("col.period", ui_lang)
+        _trend_col    = t("kam.price_trend", ui_lang)
+        _last_col     = t("col.last_promo", ui_lang)
+        _cycle_col    = t("col.cycle", ui_lang)
+        _signal_col   = t("kam.signal", ui_lang)
+        _prob_col     = t("col.probability", ui_lang)
+        _exp_price_col  = f"{t('col.expected_price', ui_lang)} ({_cur_sym})"
+        _last_price_col = f"{t('col.last_price', ui_lang)} ({_cur_sym})"
 
         kam_cols = [
             "priority", "product", "brand", "retailer", "country", "category",
-            "Aktionszeitraum", "Wahrscheinlichkeit",
-            "expected_price", "last_promo_price", "Preis-Tendenz",
-            "Ø Zyklus", "Letzte Aktion", "historical_count",
-            "Signal", "justification",
+            _period_col, _prob_col,
+            "expected_price", "last_promo_price", _trend_col,
+            _cycle_col, _last_col, "historical_count",
+            _signal_col, "justification",
         ]
         display = display[[c for c in kam_cols if c in display.columns]]
         display = display.rename(columns={
-            "priority": "Priorität",
-            "product": "Produkt",
-            "brand": "Marke",
-            "retailer": "Händler",
-            "country": "Markt",
-            "category": "Kategorie",
-            "expected_price": "Erw. Preis (€)",
-            "last_promo_price": "Letzter Preis (€)",
-            "historical_count": "Aktionen Hist.",
-            "justification": "Begründung",
+            "priority":        t("col.priority", ui_lang),
+            "product":         t("col.product", ui_lang),
+            "brand":           t("col.brand", ui_lang),
+            "retailer":        t("col.retailer", ui_lang),
+            "country":         t("col.market", ui_lang),
+            "category":        t("col.category", ui_lang),
+            "expected_price":  _exp_price_col,
+            "last_promo_price": _last_price_col,
+            "historical_count": t("col.history_count", ui_lang),
+            "justification":   t("col.justification", ui_lang),
         })
 
+        _price_fmt = "%.2f €" if market_currency == "EUR" else f"%.2f {market_currency}"
         col_cfg = {
-            "Wahrscheinlichkeit": st.column_config.ProgressColumn(
-                "Wahrscheinlichkeit", min_value=0, max_value=100, format="%.0f %%",
+            _prob_col: st.column_config.ProgressColumn(
+                _prob_col, min_value=0, max_value=100, format="%.0f %%",
             ),
-            "Erw. Preis (€)": st.column_config.NumberColumn(
-                "Erw. Preis (€)", format="%.2f €",
+            _exp_price_col: st.column_config.NumberColumn(
+                _exp_price_col, format=_price_fmt,
             ),
-            "Letzter Preis (€)": st.column_config.NumberColumn(
-                "Letzter Preis (€)", format="%.2f €",
+            _last_price_col: st.column_config.NumberColumn(
+                _last_price_col, format=_price_fmt,
             ),
         }
 
@@ -732,18 +757,18 @@ with tab1:
                 help="Ausgeschlossen wegen Preis-Fehler (Promo > Regulär)",
             )
 
-        # Data-Quality-Badge je Zeile
+        # Data-Quality-Badge per row (localised)
         def _badge(row):
             badges = []
             if pd.isna(row.get("brand")) or str(row.get("brand")).strip() == "":
-                badges.append("Marke fehlt")
+                badges.append(t("dq.brand_missing", ui_lang))
             if pd.isna(row.get("original_price_eur")):
-                badges.append("Regulärpreis fehlt")
+                badges.append(t("dq.orig_price_missing", ui_lang))
             elif pd.isna(row.get("discount_pct")) or row.get("discount_pct", 0) < 5:
-                badges.append("Kein echter Rabatt")
+                badges.append(t("dq.no_real_discount", ui_lang))
             if row.get("category_de") in (None, "", "Sonstiges", "Other", "—"):
-                badges.append("Kategorie unsicher")
-            return ", ".join(badges) if badges else "✓ Vollständig"
+                badges.append(t("dq.category_uncertain", ui_lang))
+            return ", ".join(badges) if badges else t("dq.complete", ui_lang)
 
         upcoming_df = upcoming_df.copy()
         upcoming_df["_quality"] = upcoming_df.apply(_badge, axis=1)
@@ -949,10 +974,10 @@ with tab2:
 
     # ── Prophet Preistrend-Prognose ───────────────────────────────────────────
     st.divider()
-    st.markdown('<div class="section-header">🔮 Preistrend-Prognose (KI-Forecast)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">🔮 Price trend forecast (AI)</div>', unsafe_allow_html=True)
     st.caption(
-        "KI-Modell (Prophet) erkennt Saisonalität & Trend. "
-        "Erwartete Preissturz-Punkte werden automatisch markiert."
+        "AI model (Prophet) detects seasonality & trend. "
+        "Select a specific product and retailer to get a reliable forecast."
     )
 
     pf1, pf2 = st.columns([2, 1])
@@ -963,23 +988,30 @@ with tab2:
             available_products = []
 
         if available_products:
+            # No "Alle Daten verwenden" option – require explicit product selection
             forecast_product = st.selectbox(
-                "Produkt für Prognose",
-                ["— Alle Daten verwenden —"] + available_products,
+                "Product for forecast (required)",
+                available_products,
                 key="prophet_product",
             )
-            forecast_product_val = None if forecast_product.startswith("—") else forecast_product
+            forecast_product_val = forecast_product
         else:
-            st.caption("Suche oben nach einem Produkt, um eine spezifische Auswahl zu erhalten.")
-            forecast_product_val = search_term or None
+            if search_term:
+                st.caption(f"Using search term '{search_term}' as product filter.")
+                forecast_product_val = search_term
+            else:
+                st.info(
+                    "Search for a product above first (e.g. Milka, Coca-Cola) to enable the forecast."
+                )
+                forecast_product_val = None
 
     with pf2:
-        forecast_periods = st.slider("Prognose-Horizont (Tage)", 7, 90, 30, key="prophet_periods")
+        forecast_periods = st.slider("Forecast horizon (days)", 7, 90, 30, key="prophet_periods")
 
-    run_forecast = st.button("▶ Prognose berechnen", type="primary")
+    run_forecast = st.button("▶ Run forecast", type="primary")
 
-    if run_forecast or True:
-        with st.spinner("KI-Modell rechnet…"):
+    if run_forecast and forecast_product_val:
+        with st.spinner("AI model computing…"):
             try:
                 prophet_fig, forecast_df = forecast_price_trend(
                     df=hist_df if not hist_df.empty else pd.DataFrame(),
@@ -989,48 +1021,56 @@ with tab2:
                 st.plotly_chart(prophet_fig, use_container_width=True)
 
                 if forecast_df.empty:
-                    st.warning("Keine ausreichenden Vorhersagedaten für diesen Zeitraum verfügbar.")
+                    st.warning("Not enough data for a forecast. Try a different product or expand the search.")
                 else:
-                    # Sicher auf Index zugreifen — reset_index verhindert iloc-Fehler
-                    fc = forecast_df.reset_index(drop=True)
+                    fc_p = forecast_df.reset_index(drop=True)
                     _price_col = "price_eur" if "price_eur" in hist_df.columns else "price"
+                    _hist_sorted = hist_df.sort_values("recorded_at") if "recorded_at" in hist_df.columns else hist_df
                     last_hist_price = (
-                        hist_df[_price_col].iloc[-1]
-                        if not hist_df.empty and _price_col in hist_df.columns
-                        else fc["yhat"].iloc[0]
+                        float(_hist_sorted[_price_col].dropna().iloc[-1])
+                        if not hist_df.empty and _price_col in hist_df.columns and len(_hist_sorted[_price_col].dropna()) > 0
+                        else float(fc_p["yhat"].iloc[0])
                     )
 
-                    min_pos    = fc["yhat"].idxmin()
-                    max_pos    = fc["yhat"].idxmax()
-                    end_price  = fc["yhat"].iloc[-1]
-                    min_price  = fc["yhat"].min()
-                    max_price  = fc["yhat"].max()
-                    drop_pct   = (last_hist_price - min_price) / last_hist_price * 100 if last_hist_price else 0
+                    min_pos   = int(fc_p["yhat"].idxmin())
+                    max_pos   = int(fc_p["yhat"].idxmax())
+                    end_price = float(fc_p["yhat"].iloc[-1])
+                    min_price = float(fc_p["yhat"].min())
+                    max_price = float(fc_p["yhat"].max())
+
+                    # Fix: percentage relative to current price, capped to avoid absurd negatives
+                    if last_hist_price > 0:
+                        end_pct   = max(-99.0, min(999.0, (end_price - last_hist_price) / last_hist_price * 100))
+                        drop_pct  = max(0.0, (last_hist_price - min_price) / last_hist_price * 100)
+                    else:
+                        end_pct  = 0.0
+                        drop_pct = 0.0
 
                     try:
-                        min_date = fc["ds"].iloc[min_pos].strftime("%d.%m.%Y")
-                        max_date = fc["ds"].iloc[max_pos].strftime("%d.%m.%Y")
+                        min_date = fc_p["ds"].iloc[min_pos].strftime("%d.%m.%Y")
+                        max_date = fc_p["ds"].iloc[max_pos].strftime("%d.%m.%Y")
                     except (IndexError, AttributeError):
                         min_date = "—"
                         max_date = "—"
 
+                    _p_sym = "€" if market_currency == "EUR" else market_currency
                     fi1, fi2, fi3, fi4 = st.columns(4)
                     for col, label, val, delta, css in [
-                        (fi1, f"Preis in {forecast_periods} Tagen",
-                         f"{end_price:.2f} €",
-                         f"{'▼' if end_price < last_hist_price else '▲'} {abs(end_price - last_hist_price):.2f} € vs. heute",
+                        (fi1, f"Price in {forecast_periods} days",
+                         f"{end_price:.2f} {_p_sym}",
+                         f"{'▼' if end_pct < 0 else '▲'} {abs(end_pct):.1f} % vs. today",
                          "kpi-card"),
-                        (fi2, "Erwarteter Tiefstpreis",
-                         f"{min_price:.2f} €",
-                         f"am {min_date}",
+                        (fi2, "Expected lowest price",
+                         f"{min_price:.2f} {_p_sym}",
+                         f"on {min_date}",
                          "kpi-card-green"),
-                        (fi3, "Erwarteter Höchstpreis",
-                         f"{max_price:.2f} €",
-                         f"am {max_date}",
+                        (fi3, "Expected highest price",
+                         f"{max_price:.2f} {_p_sym}",
+                         f"on {max_date}",
                          "kpi-card-red"),
-                        (fi4, "Max. erw. Preissturz",
+                        (fi4, "Max. expected price drop",
                          f"{drop_pct:.1f} %",
-                         "Ø vs. Tiefpunkt",
+                         "vs. lowest point",
                          "kpi-card-amber"),
                     ]:
                         col.markdown(
@@ -1043,27 +1083,25 @@ with tab2:
                         )
                     st.markdown("<br>", unsafe_allow_html=True)
 
-                    with st.expander("📋 Prognosedaten anzeigen"):
-                        fc_display = fc.copy()
+                    with st.expander("📋 Show forecast data"):
+                        fc_display = fc_p.copy()
                         fc_display["ds"] = fc_display["ds"].dt.strftime("%d.%m.%Y")
                         st.dataframe(
                             fc_display.rename(columns={
-                                "ds": "Datum",
-                                "yhat": "Prognose (€)",
-                                "yhat_lower": "Untergrenze (€)",
-                                "yhat_upper": "Obergrenze (€)",
-                            }).style.format({
-                                "Prognose (€)": "{:.3f}",
-                                "Untergrenze (€)": "{:.3f}",
-                                "Obergrenze (€)": "{:.3f}",
+                                "ds": "Date",
+                                "yhat": f"Forecast ({_p_sym})",
+                                "yhat_lower": f"Lower bound ({_p_sym})",
+                                "yhat_upper": f"Upper bound ({_p_sym})",
                             }),
                             use_container_width=True, hide_index=True,
                         )
-            except Exception as e:
+            except Exception:
                 st.warning(
-                    "Keine ausreichenden Vorhersagedaten für diesen Zeitraum verfügbar. "
-                    "Bitte wähle ein anderes Produkt oder erweitere den Zeitraum."
+                    "Not enough data for a forecast for this product. "
+                    "Try a different product or expand the search."
                 )
+    elif not forecast_product_val:
+        st.info("Select a product above to run the AI price forecast.")
 
     # ── Preisverteilung ───────────────────────────────────────────────────────
     st.divider()

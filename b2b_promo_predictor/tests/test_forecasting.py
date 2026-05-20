@@ -7,18 +7,23 @@ import pandas as pd
 import pytest
 
 from src.forecasting import (
+    MAX_OUTLIER_FACTOR,
     MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
     MIN_HISTORY_DAYS,
+    MIN_OBSERVATIONS,
     PROMO_TREND_THRESHOLD_PCT,
     apply_forecast_filters,
     build_forecast_from_history,
     build_forecasts_from_promo_history,
     calculate_price_trend,
+    check_forecast_eligibility,
     compute_cycle_days,
+    compute_data_quality_score,
     compute_priority,
     compute_probability,
     compute_signal,
     forecasts_to_dataframe,
+    validate_price_series,
 )
 
 
@@ -408,3 +413,316 @@ class TestForecastsToDataframe:
             "justification", "last_promos",
         }
         assert expected_cols.issubset(set(result.columns))
+
+
+# ── validate_price_series ─────────────────────────────────────────────────────
+
+class TestValidatePriceSeries:
+    def _make_df(self, prices, currency="EUR", name="Test Product", retailer="Test Retailer"):
+        return pd.DataFrame({
+            "name": [name] * len(prices),
+            "store_name": [retailer] * len(prices),
+            "price_eur": prices,
+            "currency": [currency] * len(prices),
+        })
+
+    def test_none_returns_empty(self):
+        result = validate_price_series(None)
+        assert result.empty
+
+    def test_empty_df_returns_empty(self):
+        result = validate_price_series(pd.DataFrame())
+        assert result.empty
+
+    def test_valid_prices_tagged_valid(self):
+        df = self._make_df([1.0, 1.1, 1.05, 0.99, 1.02])
+        result = validate_price_series(df)
+        assert "price_tag" in result.columns
+        assert (result["price_tag"] == "valid_price").all()
+
+    def test_outlier_high_detected(self):
+        prices = [1.0, 1.0, 1.0, 1.0, 1.0, 99.0]  # last is 99× median
+        df = self._make_df(prices)
+        result = validate_price_series(df)
+        assert result["price_tag"].iloc[-1] == "outlier_high"
+
+    def test_outlier_low_detected(self):
+        prices = [1.0, 1.0, 1.0, 1.0, 1.0, 0.001]
+        df = self._make_df(prices)
+        result = validate_price_series(df)
+        assert result["price_tag"].iloc[-1] == "outlier_low"
+
+    def test_zero_price_invalid(self):
+        df = self._make_df([1.0, 0.0, 1.0])
+        result = validate_price_series(df)
+        assert result["price_tag"].iloc[1] == "invalid_price"
+
+    def test_negative_price_invalid(self):
+        df = self._make_df([1.0, -0.5, 1.0])
+        result = validate_price_series(df)
+        assert result["price_tag"].iloc[1] == "invalid_price"
+
+    def test_mixed_currency_detected(self):
+        df = pd.DataFrame({
+            "name": ["A", "B"],
+            "store_name": ["S", "S"],
+            "price_eur": [1.0, 2.0],
+            "currency": ["EUR", "RSD"],
+        })
+        result = validate_price_series(df)
+        assert (result["price_tag"] == "mixed_currency").all()
+
+    def test_mixed_product_detected(self):
+        df = pd.DataFrame({
+            "name": ["Product A", "Product B"],
+            "store_name": ["S", "S"],
+            "price_eur": [1.0, 2.0],
+            "currency": ["EUR", "EUR"],
+        })
+        result = validate_price_series(df)
+        assert (result["price_tag"] == "mixed_product").all()
+
+    def test_mixed_retailer_detected(self):
+        df = pd.DataFrame({
+            "name": ["A", "A"],
+            "store_name": ["Konzum", "Lidl"],
+            "price_eur": [1.0, 2.0],
+            "currency": ["EUR", "EUR"],
+        })
+        result = validate_price_series(df)
+        assert (result["price_tag"] == "mixed_retailer").all()
+
+    def test_price_tag_column_added(self):
+        df = self._make_df([1.0, 1.1])
+        result = validate_price_series(df)
+        assert "price_tag" in result.columns
+
+    def test_fewer_than_3_valid_no_outlier_check(self):
+        df = self._make_df([1.0, 2.0])
+        result = validate_price_series(df)
+        # Only 2 valid prices → no IQR check, should all be valid
+        assert not (result["price_tag"] == "outlier_high").any()
+
+
+# ── check_forecast_eligibility ────────────────────────────────────────────────
+
+class TestCheckForecastEligibility:
+    def test_eligible_with_enough_data(self):
+        ok, reason = check_forecast_eligibility(
+            historical_count=10,
+            history_span_days=200,
+            outlier_ratio=0.0,
+        )
+        assert ok is True
+        assert reason == ""
+
+    def test_too_few_promos(self):
+        ok, reason = check_forecast_eligibility(
+            historical_count=1,
+            history_span_days=200,
+        )
+        assert ok is False
+        assert "1" in reason
+
+    def test_too_short_span(self):
+        ok, reason = check_forecast_eligibility(
+            historical_count=5,
+            history_span_days=30,
+        )
+        assert ok is False
+        assert "30" in reason
+
+    def test_too_many_outliers(self):
+        ok, reason = check_forecast_eligibility(
+            historical_count=10,
+            history_span_days=365,
+            outlier_ratio=0.6,
+        )
+        assert ok is False
+        assert "outlier" in reason.lower() or "%" in reason
+
+    def test_exactly_min_promos_eligible(self):
+        ok, _ = check_forecast_eligibility(
+            historical_count=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
+            history_span_days=MIN_HISTORY_DAYS,
+        )
+        assert ok is True
+
+    def test_one_below_min_promos_not_eligible(self):
+        ok, _ = check_forecast_eligibility(
+            historical_count=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER - 1,
+            history_span_days=MIN_HISTORY_DAYS,
+        )
+        assert ok is False
+
+
+# ── compute_data_quality_score ────────────────────────────────────────────────
+
+class TestComputeDataQualityScore:
+    def _full_forecast(self) -> "PromoForecast":
+        from src.forecasting import PromoForecast
+        return PromoForecast(
+            product="Test", brand="Brand", retailer="Store",
+            country="HR", category="Hrana",
+            historical_count=12,
+            avg_cycle_days=30, median_cycle_days=30,
+            last_promo_price=1.5,
+            avg_promo_price_90d=1.4,
+            avg_promo_price_180d=1.45,
+            typical_discount_pct_min=10.0,
+            typical_discount_pct_max=25.0,
+            prediction_status="ok",
+        )
+
+    def test_score_between_0_and_100(self):
+        fc = self._full_forecast()
+        score = compute_data_quality_score(fc)
+        assert 0.0 <= score <= 100.0
+
+    def test_full_data_high_score(self):
+        fc = self._full_forecast()
+        score = compute_data_quality_score(fc)
+        assert score >= 60.0
+
+    def test_empty_forecast_low_score(self):
+        from src.forecasting import PromoForecast
+        fc = PromoForecast(
+            product="X", brand="", retailer="Y", country="HR", category="",
+            historical_count=0,
+        )
+        score = compute_data_quality_score(fc)
+        assert score < 30.0
+
+    def test_more_history_gives_higher_score(self):
+        from src.forecasting import PromoForecast
+        fc_low = PromoForecast(
+            product="X", brand="", retailer="Y", country="HR", category="",
+            historical_count=3, avg_cycle_days=30, median_cycle_days=30,
+        )
+        fc_high = PromoForecast(
+            product="X", brand="", retailer="Y", country="HR", category="",
+            historical_count=12, avg_cycle_days=30, median_cycle_days=30,
+        )
+        assert compute_data_quality_score(fc_high) > compute_data_quality_score(fc_low)
+
+    def test_score_with_discount_info_higher(self):
+        from src.forecasting import PromoForecast
+        fc_no_disc = PromoForecast(
+            product="X", brand="", retailer="Y", country="HR", category="",
+            historical_count=6, avg_cycle_days=30, median_cycle_days=30,
+        )
+        fc_with_disc = PromoForecast(
+            product="X", brand="", retailer="Y", country="HR", category="",
+            historical_count=6, avg_cycle_days=30, median_cycle_days=30,
+            typical_discount_pct_min=10.0, typical_discount_pct_max=20.0,
+        )
+        assert compute_data_quality_score(fc_with_disc) > compute_data_quality_score(fc_no_disc)
+
+    def test_returns_float(self):
+        fc = self._full_forecast()
+        score = compute_data_quality_score(fc)
+        assert isinstance(score, float)
+
+
+# ── i18n module ───────────────────────────────────────────────────────────────
+
+class TestI18n:
+    def test_t_returns_string(self):
+        from src.i18n import t
+        result = t("sidebar.market", "EN")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_t_fallback_to_en(self):
+        from src.i18n import t
+        result_en = t("sidebar.market", "EN")
+        result_unknown = t("sidebar.market", "XX")
+        assert result_en == result_unknown
+
+    def test_t_unknown_key_returns_key(self):
+        from src.i18n import t
+        result = t("this.key.does.not.exist", "EN")
+        assert result == "this.key.does.not.exist"
+
+    def test_t_format_substitution(self):
+        from src.i18n import t
+        result = t("kam.min_req", "EN", n=3, d=90)
+        assert "3" in result
+        assert "90" in result
+
+    def test_translate_category_en(self):
+        from src.i18n import translate_category
+        assert translate_category("Hrana", "EN") == "Food"
+
+    def test_translate_category_hr(self):
+        from src.i18n import translate_category
+        assert translate_category("Hrana", "HR") == "Hrana"
+
+    def test_translate_category_mk(self):
+        from src.i18n import translate_category
+        result = translate_category("Hrana", "MK")
+        assert result == "Храна"
+
+    def test_translate_category_unknown(self):
+        from src.i18n import translate_category
+        result = translate_category("UnknownCat999", "EN")
+        assert result == "UnknownCat999"
+
+    def test_all_supported_langs_have_market_keys(self):
+        from src.i18n import SUPPORTED_LANGS, t
+        for lang in SUPPORTED_LANGS:
+            result = t("sidebar.market", lang)
+            assert isinstance(result, str)
+            assert len(result) > 0
+
+    def test_format_price_eur(self):
+        from src.i18n import format_price
+        result = format_price(1.99, "EUR")
+        assert "1.99" in result
+        assert "€" in result
+
+    def test_format_price_rsd(self):
+        from src.i18n import format_price
+        result = format_price(250.0, "RSD")
+        assert "250" in result
+        assert "din" in result
+
+    def test_format_price_none(self):
+        from src.i18n import format_price
+        assert format_price(None) == "—"
+
+    def test_get_market_currency(self):
+        from src.i18n import get_market_currency
+        assert get_market_currency("HR") == "EUR"
+        assert get_market_currency("RS") == "RSD"
+        assert get_market_currency("MK") == "MKD"
+        assert get_market_currency("BA") == "BAM"
+        assert get_market_currency("SI") == "EUR"
+
+    def test_get_market_currency_none(self):
+        from src.i18n import get_market_currency
+        assert get_market_currency(None) == "EUR"
+
+    def test_default_language_by_market(self):
+        from src.i18n import DEFAULT_LANGUAGE_BY_MARKET
+        assert DEFAULT_LANGUAGE_BY_MARKET["HR"] == "HR"
+        assert DEFAULT_LANGUAGE_BY_MARKET["SI"] == "SL"
+        assert DEFAULT_LANGUAGE_BY_MARKET["RS"] == "SR"
+        assert DEFAULT_LANGUAGE_BY_MARKET["MK"] == "MK"
+
+    def test_market_currency_dict_completeness(self):
+        from src.i18n import MARKET_CURRENCY, CATEGORY_TRANSLATIONS
+        assert len(MARKET_CURRENCY) >= 6
+        assert len(CATEGORY_TRANSLATIONS) >= 5
+
+    def test_category_translations_food(self):
+        from src.i18n import CATEGORY_TRANSLATIONS
+        assert "Hrana" in CATEGORY_TRANSLATIONS
+        assert CATEGORY_TRANSLATIONS["Hrana"]["EN"] == "Food"
+        assert CATEGORY_TRANSLATIONS["Hrana"]["MK"] == "Храна"
+
+    def test_all_langs_have_signal_high(self):
+        from src.i18n import SUPPORTED_LANGS, t
+        for lang in SUPPORTED_LANGS:
+            result = t("signal.high", lang)
+            assert "🔴" in result
