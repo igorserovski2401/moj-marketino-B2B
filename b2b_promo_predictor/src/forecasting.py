@@ -181,40 +181,48 @@ def build_justification(
     historical_count: int,
     price_trend: PriceTrend,
     price_trend_pct: float,
+    lang: str = "EN",
 ) -> str:
-    """Menschenlesbare Begründung für die Vorhersage."""
+    """Human-readable justification (language-aware)."""
+    # Lazy import to avoid circular dep
+    try:
+        from .i18n import t
+    except ImportError:
+        def t(key, lang="EN", **kw): return key
+
     parts: list[str] = []
+    days_word = t("general.days", lang)
 
     if avg_cycle and days_since_last is not None:
         if days_since_last > avg_cycle * 1.2:
             parts.append(
-                f"Letzte Aktion vor {days_since_last} Tagen – "
-                f"über dem Ø-Zyklus von {avg_cycle} Tagen (überfällig)."
+                f"{t('general.days_ago', lang, d=days_since_last)} – "
+                f"> Ø {avg_cycle} {days_word}."
             )
         elif days_since_last < avg_cycle * 0.5:
             parts.append(
-                f"Letzte Aktion vor {days_since_last} Tagen – "
-                f"unter dem Ø-Zyklus von {avg_cycle} Tagen."
+                f"{t('general.days_ago', lang, d=days_since_last)} – "
+                f"< Ø {avg_cycle} {days_word}."
             )
         else:
             parts.append(
-                f"Letzte Aktion vor {days_since_last} Tagen, "
-                f"Ø-Zyklus {avg_cycle} Tage."
+                f"{t('general.days_ago', lang, d=days_since_last)}, Ø {avg_cycle} {days_word}."
             )
 
     if historical_count > 0:
-        parts.append(f"Basis: {historical_count} historische Aktionen.")
+        parts.append(f"n={historical_count}.")
 
     if price_trend != "unbekannt" and abs(price_trend_pct) > 0.5:
-        if price_trend == "steigend":
-            parts.append(f"Promo-Preise zuletzt steigend ({price_trend_pct:+.1f} %).")
-        elif price_trend == "fallend":
-            parts.append(f"Promo-Preise zuletzt fallend ({price_trend_pct:+.1f} %).")
-        else:
-            parts.append(f"Promo-Preise stabil ({price_trend_pct:+.1f} %).")
+        label = t(
+            "trend.rising" if price_trend == "steigend"
+            else "trend.falling" if price_trend == "fallend"
+            else "trend.stable",
+            lang,
+        )
+        parts.append(f"{label} ({price_trend_pct:+.1f} %).")
 
     if not parts:
-        return "Keine belastbare Begründung verfügbar."
+        return ""
     return " ".join(parts)
 
 
@@ -250,6 +258,7 @@ def build_forecast_from_history(
     country: str,
     category: str,
     history: pd.DataFrame,
+    lang: str = "EN",
 ) -> PromoForecast:
     """Erstellt eine PromoForecast aus historischen Aktionsdaten.
 
@@ -257,6 +266,7 @@ def build_forecast_from_history(
         history: Aktionen für genau diese Produkt-Händler-Kombi, beliebige Sortierung.
                  Erwartet Spalten [valid_from, valid_until, price_eur, original_price_eur,
                  discount_pct].
+        lang: UI language for justification strings.
     """
     fc = PromoForecast(
         product=product,
@@ -415,6 +425,7 @@ def build_forecast_from_history(
         fc.historical_count,
         fc.price_trend,
         fc.price_trend_pct,
+        lang=lang,
     )
     return fc
 
@@ -422,6 +433,7 @@ def build_forecast_from_history(
 def build_forecasts_from_promo_history(
     promos_df: pd.DataFrame,
     min_historical: int = MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
+    lang: str = "EN",
 ) -> list[PromoForecast]:
     """Erstellt Forecasts für alle (Produkt, Händler)-Kombinationen.
 
@@ -472,6 +484,7 @@ def build_forecasts_from_promo_history(
             country=country,
             category=category,
             history=group,
+            lang=lang,
         )
         forecasts.append(fc)
 

@@ -20,8 +20,8 @@ from .config import settings
 class PromoData(BaseModel):
     """Schema für ein einzelnes Aktionsprodukt aus einem Discounter-Prospekt."""
 
-    retailer: str = Field(..., description="Name des Discounters, z.B. Lidl, Aldi")
-    country: str = Field(default="DE", description="ISO-Ländercode")
+    retailer: str = Field(..., description="Name des Discounters, z.B. Konzum, Kaufland")
+    country: str = Field(default="HR", description="ISO-Ländercode (HR/SI/BA/RS/MK/ME)")
     valid_from: date = Field(..., description="Aktionsbeginn")
     valid_to: date = Field(..., description="Aktionsende")
     raw_product_name: str = Field(..., description="Produktname exakt wie im Prospekt")
@@ -54,7 +54,7 @@ _MOCK_PRODUCTS = [
     ("Pringles Original 185g", "Pringles", 1.79, 185, "g"),
 ]
 
-_RETAILERS = ["Lidl", "Aldi Süd", "Penny", "Rewe", "Netto"]
+_RETAILERS = ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex"]
 
 
 def _generate_mock_data(n: int = 8) -> list[PromoData]:
@@ -66,7 +66,7 @@ def _generate_mock_data(n: int = 8) -> list[PromoData]:
         start = today + timedelta(days=random.randint(-3, 7))
         return_obj = PromoData(
             retailer=random.choice(_RETAILERS),
-            country="DE",
+            country="HR",
             valid_from=start,
             valid_to=start + timedelta(days=random.randint(5, 14)),
             raw_product_name=raw,

@@ -24,7 +24,7 @@ def _make_mock_history(n_rows: int = 300) -> pd.DataFrame:
         "Red Bull 250ml",
         "Pringles Original 185g",
     ]
-    retailers = ["Lidl", "Aldi Süd", "Penny", "Rewe", "Netto"]
+    retailers = ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex", "Maxi", "Voli"]
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n_rows, freq="3D")
 
     return pd.DataFrame(

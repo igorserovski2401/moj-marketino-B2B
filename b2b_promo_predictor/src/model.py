@@ -97,22 +97,22 @@ def _mock_predictions(n: int = 10) -> pd.DataFrame:
 def predict(
     df: pd.DataFrame | None = None,
     model: Any | None = None,
+    allow_mock: bool = False,
 ) -> pd.DataFrame:
     """Erstellt Aktionsvorhersagen für die nächste Woche.
 
-    Args:
-        df: Rohdaten. Wenn None, werden Mock-Daten genutzt.
-        model: Vortrainiertes Modell. Wird aus Disk geladen wenn None.
-
-    Returns:
-        DataFrame mit Spalten [product, retailer, predicted_promo_start,
-        confidence, expected_price].
+    In production mode (allow_mock=False) returns an empty DataFrame when no
+    model or no data is available — never silently shows demo retailers.
     """
     if model is None:
         model = _load_model()
 
     if model is None:
-        return _mock_predictions()
+        if allow_mock:
+            return _mock_predictions()
+        return pd.DataFrame(columns=[
+            "product", "retailer", "predicted_promo_start", "confidence", "expected_price",
+        ])
 
     try:
         feature_df = create_features(df)
@@ -127,7 +127,11 @@ def predict(
         )
         return result.sort_values("confidence", ascending=False).reset_index(drop=True)
     except Exception:
-        return _mock_predictions()
+        if allow_mock:
+            return _mock_predictions()
+        return pd.DataFrame(columns=[
+            "product", "retailer", "predicted_promo_start", "confidence", "expected_price",
+        ])
 
 
 def get_feature_importance(model: Any | None = None) -> pd.DataFrame:
@@ -162,40 +166,35 @@ def forecast_price_trend(
     df: pd.DataFrame,
     product_id: str | None = None,
     periods: int = 30,
+    allow_mock: bool = False,
+    currency: str = "EUR",
+    lang: str = "EN",
+    title_prefix: str = "",
 ) -> tuple[go.Figure, pd.DataFrame]:
-    """Trainiert ein Prophet-Modell auf historischen Preisen und prognostiziert den Trend.
+    """Prophet-based price trend forecast, with hard production isolation.
 
-    Erkennt automatisch erwartete Preissturz-Punkte und annotiert sie im Chart.
-    Fällt auf synthetische Mock-Daten zurück wenn zu wenig Datenpunkte oder
-    Prophet nicht installiert ist.
-
-    Args:
-        df: Preishistorie-DataFrame. Erwartet Spalten [recorded_at|date, price|price_promo]
-            und optional [product_name] für die Filterung.
-        product_id: Produktname zum Filtern. None = alle Zeilen verwenden.
-        periods: Anzahl Tage für die Zukunftsprognose (Standard: 30).
-
-    Returns:
-        Tuple aus (Plotly Figure, forecast-DataFrame mit [ds, yhat, yhat_lower, yhat_upper]).
+    In production mode (allow_mock=False) returns an empty figure when there
+    is insufficient data — never falls back to synthetic demo data.
     """
+    from .i18n import t
+
     work = df.copy()
 
-    # Filtern nach Produkt
     if product_id and "product_name" in work.columns:
         mask = work["product_name"].str.contains(product_id, case=False, na=False)
         work = work[mask]
 
-    # Spalten normieren
     date_col  = next((c for c in ["recorded_at", "date", "valid_from"] if c in work.columns), None)
-    price_col = next((c for c in ["price", "price_promo"] if c in work.columns), None)
+    price_col = next((c for c in ["price_eur", "price", "price_promo"] if c in work.columns), None)
 
     if date_col is None or price_col is None:
-        return _mock_forecast_figure(product_id or "Produkt", periods)
+        if allow_mock:
+            return _mock_forecast_figure(product_id or "Product", periods, currency=currency, lang=lang)
+        return _empty_forecast(lang, t("forecast.no_data_columns", lang)), pd.DataFrame()
 
     work["ds"] = pd.to_datetime(work[date_col], errors="coerce")
     work["y"]  = pd.to_numeric(work[price_col], errors="coerce")
 
-    # Pro Tag aggregieren (Mittelwert über alle Händler)
     prophet_df = (
         work.dropna(subset=["ds", "y"])
         .groupby("ds")["y"]
@@ -205,7 +204,9 @@ def forecast_price_trend(
     )
 
     if len(prophet_df) < 5:
-        return _mock_forecast_figure(product_id or "Produkt", periods)
+        if allow_mock:
+            return _mock_forecast_figure(product_id or "Product", periods, currency=currency, lang=lang)
+        return _empty_forecast(lang, t("forecast.too_few_points", lang, n=len(prophet_df))), pd.DataFrame()
 
     try:
         from prophet import Prophet  # lazy import – optional dependency
@@ -218,19 +219,84 @@ def forecast_price_trend(
             changepoint_prior_scale=0.15,
             interval_width=0.80,
         )
-        # Zusätzliche Monatssaisonalität für Aktionszyklen
         m.add_seasonality(name="monthly", period=30.5, fourier_order=5)
         m.fit(prophet_df)
 
         future   = m.make_future_dataframe(periods=periods)
         forecast = m.predict(future)
 
-        fig = _build_forecast_figure(prophet_df, forecast, product_id or "Produkt", periods)
+        title = title_prefix or (product_id or "Product")
+        fig = _build_forecast_figure(prophet_df, forecast, title, periods, currency=currency, lang=lang)
         future_fc = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(periods).copy()
         return fig, future_fc
 
     except Exception:
-        return _mock_forecast_figure(product_id or "Produkt", periods)
+        if allow_mock:
+            return _mock_forecast_figure(product_id or "Product", periods, currency=currency, lang=lang)
+        return _empty_forecast(lang, t("forecast.prophet_failed", lang)), pd.DataFrame()
+
+
+def _empty_forecast(lang: str, reason: str) -> go.Figure:
+    """Empty placeholder figure shown when production forecast is blocked."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=f"<b>{reason}</b>",
+        xref="paper", yref="paper", x=0.5, y=0.5,
+        showarrow=False,
+        font=dict(size=14, color="#6B7280"),
+    )
+    fig.update_layout(
+        margin=dict(t=30, b=30, l=30, r=30),
+        plot_bgcolor="white", paper_bgcolor="white",
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        height=300,
+    )
+    return fig
+
+
+def compute_backtest_mape(prophet_df: pd.DataFrame, periods: int = 14) -> tuple[float, float, float]:
+    """Run an 80/20 backtest on the Prophet model.
+
+    Returns (mape, mae, bias) where mape is in [0, ∞) (e.g. 0.15 = 15% error).
+    Returns (NaN, NaN, NaN) on failure or insufficient data.
+    """
+    nan = float("nan")
+    try:
+        from prophet import Prophet
+    except ImportError:
+        return nan, nan, nan
+
+    if len(prophet_df) < 12:
+        return nan, nan, nan
+
+    split = int(len(prophet_df) * 0.8)
+    train, test = prophet_df.iloc[:split], prophet_df.iloc[split:]
+    if len(test) < 1:
+        return nan, nan, nan
+
+    try:
+        m = Prophet(
+            seasonality_mode="multiplicative",
+            yearly_seasonality=False,
+            weekly_seasonality=True,
+            daily_seasonality=False,
+            changepoint_prior_scale=0.15,
+            interval_width=0.80,
+        )
+        m.fit(train)
+        future = pd.DataFrame({"ds": test["ds"].values})
+        pred = m.predict(future)["yhat"].values
+        actual = test["y"].values
+        mask = actual > 0
+        if mask.sum() < 1:
+            return nan, nan, nan
+        errs = (pred[mask] - actual[mask]) / actual[mask]
+        mape = float(abs(errs).mean())
+        mae = float(abs(pred[mask] - actual[mask]).mean())
+        bias = float(errs.mean())
+        return mape, mae, bias
+    except Exception:
+        return nan, nan, nan
 
 
 def _build_forecast_figure(
@@ -238,91 +304,108 @@ def _build_forecast_figure(
     forecast: pd.DataFrame,
     title: str,
     periods: int,
+    currency: str = "EUR",
+    lang: str = "EN",
 ) -> go.Figure:
-    """Baut einen Plotly-Figure mit historischen Preisen, Prognose und Konfidenzband."""
+    """Build a Plotly figure with historical prices, forecast and confidence band."""
+    from .i18n import t, CURRENCY_SYMBOLS
+
+    cur_sym = CURRENCY_SYMBOLS.get(currency, currency)
     today = pd.Timestamp.today().normalize()
     hist_last_price = historical["y"].iloc[-1] if not historical.empty else None
 
-    # Konfidenzband (Fläche zwischen yhat_lower und yhat_upper)
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
         x=forecast["ds"], y=forecast["yhat_upper"],
         mode="lines", line=dict(width=0),
-        name="Oberes KI", showlegend=False,
-        hoverinfo="skip",
+        showlegend=False, hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
         x=forecast["ds"], y=forecast["yhat_lower"],
         mode="lines", line=dict(width=0),
-        fill="tonexty",
-        fillcolor="rgba(26, 86, 219, 0.12)",
-        name="80 % Konfidenzband",
+        fill="tonexty", fillcolor="rgba(26, 86, 219, 0.12)",
+        name=t("forecast.confidence_band", lang),
         hoverinfo="skip",
     ))
 
-    # Prognoselinie
     fig.add_trace(go.Scatter(
         x=forecast["ds"], y=forecast["yhat"].round(4),
         mode="lines",
         line=dict(color="#1A56DB", width=2.5, dash="dot"),
-        name="Prophet-Prognose",
-        hovertemplate="%{x|%d.%m.%Y}<br>Prognose: <b>%{y:.2f} €</b><extra></extra>",
+        name=t("forecast.prophet_forecast", lang),
+        hovertemplate=f"%{{x|%d.%m.%Y}}<br>{t('forecast.forecast_label', lang)}: <b>%{{y:.2f}} {cur_sym}</b><extra></extra>",
     ))
 
-    # Historische Preise
     fig.add_trace(go.Scatter(
         x=historical["ds"], y=historical["y"].round(4),
         mode="lines+markers",
         line=dict(color="#111827", width=2),
         marker=dict(size=6, color="#111827"),
-        name="Historischer Preis",
-        hovertemplate="%{x|%d.%m.%Y}<br>Preis: <b>%{y:.2f} €</b><extra></extra>",
+        name=t("forecast.historical_price", lang),
+        hovertemplate=f"%{{x|%d.%m.%Y}}<br>{t('forecast.price_label', lang)}: <b>%{{y:.2f}} {cur_sym}</b><extra></extra>",
     ))
 
-    # "Heute"-Linie
     fig.add_vline(
         x=today.timestamp() * 1000,
         line_dash="dash", line_color="#6B7280", line_width=1.5,
-        annotation_text="Heute", annotation_position="top right",
+        annotation_text=t("forecast.today", lang), annotation_position="top right",
         annotation_font=dict(color="#6B7280", size=11),
     )
 
-    # Erwarteten Preissturz annotieren
+    # Annotate min point with clear semantics — never a misleading positive "drop"
     future_only = forecast[forecast["ds"] > today]
-    if not future_only.empty and hist_last_price is not None:
-        min_idx   = future_only["yhat"].idxmin()
-        min_row   = future_only.loc[min_idx]
-        drop_pct  = (hist_last_price - min_row["yhat"]) / hist_last_price * 100
+    if not future_only.empty and hist_last_price is not None and hist_last_price > 0:
+        min_idx = future_only["yhat"].idxmin()
+        min_row = future_only.loc[min_idx]
+        min_price = float(min_row["yhat"])
 
-        if drop_pct > 3:  # Nur annotieren wenn Sturz > 3%
-            fig.add_annotation(
-                x=min_row["ds"], y=min_row["yhat"],
-                text=f"⬇ Tiefpunkt<br>{min_row['yhat']:.2f} €<br>({drop_pct:+.1f} %)",
-                showarrow=True, arrowhead=2,
-                arrowcolor="#F05252", font=dict(color="#F05252", size=11),
-                bgcolor="rgba(254,226,226,0.9)", bordercolor="#F05252",
-                ax=40, ay=-50,
-            )
-            fig.add_vline(
-                x=min_row["ds"].timestamp() * 1000,
-                line_dash="dot", line_color="#F05252", line_width=1,
-            )
+        if min_price < hist_last_price:
+            drop_pct = (hist_last_price - min_price) / hist_last_price * 100
+            label = t("forecast.lowest_drop", lang, val=min_price, sym=cur_sym, pct=drop_pct)
+            color = "#F05252"
+        else:
+            rise_pct = (min_price - hist_last_price) / hist_last_price * 100
+            label = t("forecast.no_drop_expected", lang, val=min_price, sym=cur_sym, pct=rise_pct)
+            color = "#059669"
+
+        fig.add_annotation(
+            x=min_row["ds"], y=min_price,
+            text=label,
+            showarrow=True, arrowhead=2,
+            arrowcolor=color, font=dict(color=color, size=11),
+            bgcolor="rgba(255,255,255,0.92)", bordercolor=color,
+            ax=40, ay=-50,
+        )
+        fig.add_vline(
+            x=min_row["ds"].timestamp() * 1000,
+            line_dash="dot", line_color=color, line_width=1,
+        )
 
     fig.update_layout(
-        title=dict(text=f"🔮 Preisprognose: {title} (nächste {periods} Tage)", font=dict(size=15)),
-        xaxis=dict(title="Datum", showgrid=True, gridcolor="#F3F4F6"),
-        yaxis=dict(title="Preis (€)", showgrid=True, gridcolor="#F3F4F6"),
+        title=dict(
+            text=f"🔮 {t('forecast.chart_title', lang, product=title, days=periods)}",
+            font=dict(size=15),
+        ),
+        xaxis=dict(title=t("forecast.axis_date", lang), showgrid=True, gridcolor="#F3F4F6"),
+        yaxis=dict(
+            title=t("forecast.axis_price", lang, currency=currency),
+            showgrid=True, gridcolor="#F3F4F6",
+        ),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(t=70, b=30, l=10, r=10),
     )
     return fig
 
 
-def _mock_forecast_figure(product_name: str, periods: int) -> tuple[go.Figure, pd.DataFrame]:
+def _mock_forecast_figure(
+    product_name: str,
+    periods: int,
+    currency: str = "EUR",
+    lang: str = "EN",
+) -> tuple[go.Figure, pd.DataFrame]:
     """Generiert einen realistisch aussehenden Mock-Forecast ohne echte Daten."""
     rng   = np.random.default_rng(seed=abs(hash(product_name)) % (2**32))
     today = pd.Timestamp.today().normalize()
@@ -357,7 +440,10 @@ def _mock_forecast_figure(product_name: str, periods: int) -> tuple[go.Figure, p
         "yhat": all_yhat, "yhat_lower": all_lower, "yhat_upper": all_upper,
     })
 
-    fig = _build_forecast_figure(historical, full_fc, f"{product_name} (Demo)", periods)
+    fig = _build_forecast_figure(
+        historical, full_fc, f"{product_name} [DEMO]", periods,
+        currency=currency, lang=lang,
+    )
     future_fc = pd.DataFrame({
         "ds": future_dates, "yhat": yhat.round(4),
         "yhat_lower": yhat_lower.round(4), "yhat_upper": yhat_upper.round(4),
