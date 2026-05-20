@@ -79,7 +79,7 @@ def _mock_predictions(n: int = 10) -> pd.DataFrame:
         "Red Bull 250ml",
         "Pringles Original 185g",
     ]
-    retailers = ["Lidl", "Aldi Süd", "Penny", "Rewe", "Netto"]
+    retailers = ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex", "Maxi", "Voli"]
     today = date.today()
     promo_starts = [today + timedelta(days=int(d)) for d in rng.integers(1, 14, n)]
 

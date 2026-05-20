@@ -182,7 +182,10 @@ def get_retailer_distribution(country_code: str | None = None) -> pd.DataFrame:
     """Produkt-Anzahl pro Händler."""
     client = get_client()
     if client is None:
-        return pd.DataFrame({"store_name": ["Lidl", "Kaufland", "Penny"], "cnt": [361127, 3177, 1200]})
+        return pd.DataFrame({
+            "store_name": ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex", "Maxi", "Voli", "Plodine", "Mercator"],
+            "cnt": [182430, 154210, 112800, 98340, 76120, 61450, 54380, 43200, 38760, 31200],
+        })
 
     try:
         q = _safe_query(client, "products", "store_name,country_code")
@@ -265,7 +268,7 @@ def get_distinct_stores(country_code: str | None = None) -> list[str]:
     """Alle Händlernamen für den Dropdown-Filter."""
     client = get_client()
     if client is None:
-        return ["Lidl", "Kaufland", "Penny", "Rewe", "Netto"]
+        return ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex", "Maxi", "Voli", "Plodine", "Mercator"]
 
     try:
         q = _safe_query(client, "products", "store_name,country_code")
@@ -357,8 +360,8 @@ def _mock_products(n: int = 20) -> pd.DataFrame:
         "Ariel Pods 35 Kom.", "Pampers Gr.3 44 Stk.", "Bio Vollmilch 1L",
         "Ritter Sport Voll-Nuss 100g",
     ]
-    stores = ["Lidl", "Kaufland", "Penny", "Rewe", "Netto"]
-    countries = ["HR", "MK", "SI"]
+    stores = ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex", "Maxi", "Voli", "Plodine", "Mercator"]
+    countries = ["HR", "MK", "SI", "RS", "BA", "ME"]
     today = pd.Timestamp.today()
 
     return pd.DataFrame({
@@ -390,7 +393,7 @@ def _mock_price_history(product_name: str = "Bio Vollmilch 1L") -> pd.DataFrame:
     dates = pd.date_range(end=pd.Timestamp.today(), periods=30, freq="W")
     return pd.DataFrame({
         "product_name": product_name,
-        "retailer": rng.choice(["Lidl", "Kaufland", "Penny"], len(dates)),
+        "retailer": rng.choice(["Konzum", "Spar", "Kaufland", "Lidl", "Bingo"], len(dates)),
         "country_code": "HR",
         "price": (1.29 + rng.uniform(-0.3, 0.4, len(dates))).round(2),
         "recorded_at": dates,
