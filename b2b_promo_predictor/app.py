@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from src.quality import run_quality_pipeline
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -86,9 +87,19 @@ COUNTRY_DE: dict[str, str] = {
 
 
 def cat_de(name: str | None) -> str:
+    """Fallback-Übersetzer für Kategorien ohne category_de-Spalte."""
     if not name:
         return "—"
     return CATEGORY_DE.get(name, name)
+
+
+def _apply_quality(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Führt Quality Pipeline aus und gibt bereinigte Daten + Stats zurück."""
+    if df.empty:
+        return df, {"n_total": 0, "n_brand_fixed": 0, "n_cat_fixed": 0,
+                    "n_price_swapped": 0, "n_excluded": 0, "n_clean": 0}
+    clean, report = run_quality_pipeline(df)
+    return clean, report._asdict()
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -280,8 +291,9 @@ with tab1:
             df = df[df["category_l1"] == cat]
         return df
 
-    with st.spinner("Lade bevorstehende Aktionen…"):
-        upcoming_df = _upcoming(sel_country, days_ahead, sel_cat)
+    with st.spinner("Lade & bereinige Aktionsdaten…"):
+        upcoming_raw = _upcoming(sel_country, days_ahead, sel_cat)
+        upcoming_df, _uq = _apply_quality(upcoming_raw)
 
     if brand_filter and not upcoming_df.empty and "name" in upcoming_df.columns:
         mask = upcoming_df["name"].str.contains(brand_filter, case=False, na=False)
@@ -291,34 +303,35 @@ with tab1:
         n_up = len(upcoming_df)
         n_retailers = upcoming_df["store_name"].nunique() if "store_name" in upcoming_df.columns else 0
 
-        ua, ub, uc = st.columns(3)
+        ua, ub, uc, ud = st.columns(4)
         ua.metric("Aktionen gefunden", str(n_up))
         ub.metric("Beteiligte Händler", str(n_retailers))
-        if "discount_depth" in upcoming_df.columns:
-            avg_disc = upcoming_df["discount_depth"].dropna().mean()
-            uc.metric("Ø Rabatt", f"{avg_disc * 100:.1f} %")
+        if "discount_pct" in upcoming_df.columns:
+            avg_disc = upcoming_df["discount_pct"].dropna().mean()
+            uc.metric("Ø Rabatt", f"{avg_disc:.1f} %" if pd.notna(avg_disc) else "—")
+        if _uq["n_excluded"] > 0:
+            ud.metric("⚠️ Fehlerhafte Datensätze", str(_uq["n_excluded"]),
+                      help="Ausgeschlossen wegen Preis-Fehler (Promo > Regulär)")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Saubere Anzeige-Tabelle — Preise in EUR (normiert), Originalwährung als Hinweis
-        up_show = upcoming_df[[c for c in [
-            "store_name", "name", "brand", "price_eur", "original_price_eur",
-            "currency", "category_l1", "country_code", "valid_from", "valid_until",
-            "discount_label",
-        ] if c in upcoming_df.columns]].copy()
+        # Bereinigte Tabelle — category_de aus Quality-Pipeline, Preise in EUR
+        _up_cols = ["store_name", "name", "brand", "price_eur", "original_price_eur",
+                    "discount_pct", "currency", "category_de", "country_code",
+                    "valid_from", "valid_until", "discount_label"]
+        up_show = upcoming_df[[c for c in _up_cols if c in upcoming_df.columns]].copy()
 
-        if "discount_depth" in upcoming_df.columns:
-            up_show["Rabatt %"] = (upcoming_df["discount_depth"] * 100).round(1)
+        # Fallback category_de wenn Spalte fehlt
+        if "category_de" not in up_show.columns and "category_l1" in upcoming_df.columns:
+            up_show["category_de"] = upcoming_df["category_l1"].apply(cat_de)
 
         up_show = up_show.rename(columns={
-            "store_name": "Händler", "name": "Produkt", "brand": "Marke",
+            "store_name": "Händler", "name": "Produkt", "brand": "Marke (bereinigt)",
             "price_eur": "Promo-Preis (€)", "original_price_eur": "Regulärpreis (€)",
-            "currency": "Währung", "category_l1": "Kategorie",
-            "country_code": "Markt", "valid_from": "Start", "valid_until": "Ende",
-            "discount_label": "Rabatt",
+            "discount_pct": "Rabatt %", "currency": "Währung",
+            "category_de": "Kategorie", "country_code": "Markt",
+            "valid_from": "Start", "valid_until": "Ende", "discount_label": "Rabatt-Label",
         })
-        if "Kategorie" in up_show.columns:
-            up_show["Kategorie DE"] = up_show["Kategorie"].apply(cat_de)
 
         col_cfg: dict = {}
         if "Promo-Preis (€)" in up_show.columns:
@@ -332,16 +345,19 @@ with tab1:
 
         st.dataframe(up_show, column_config=col_cfg, use_container_width=True, hide_index=True, height=380)
 
-        # Treemap: Aktionen nach Händler & Kategorie
-        if "store_name" in upcoming_df.columns and "category_l1" in upcoming_df.columns:
+        # Treemap: Aktionen nach Händler & bereinigter Kategorie
+        _tree_cat = "category_de" if "category_de" in upcoming_df.columns else "category_l1"
+        if "store_name" in upcoming_df.columns and _tree_cat in upcoming_df.columns:
             treemap_df = (
-                upcoming_df.groupby(["store_name", "category_l1"])
+                upcoming_df.groupby(["store_name", _tree_cat])
                 .size().reset_index(name="Anzahl")
             )
-            treemap_df["kat_de"] = treemap_df["category_l1"].apply(cat_de)
+            if _tree_cat != "category_de":
+                treemap_df["category_de"] = treemap_df[_tree_cat].apply(cat_de)
+                _tree_cat = "category_de"
             fig_tree = px.treemap(
                 treemap_df,
-                path=["store_name", "kat_de"],
+                path=["store_name", _tree_cat],
                 values="Anzahl",
                 title=f"Aktionsverteilung – nächste {kw_vorschau} Wochen",
                 color="Anzahl",
@@ -740,29 +756,54 @@ with tab3:
     def _q_load(country, store, cat, n):
         return load_products(country_code=country, store_name=store, category_l1=cat, limit=n)
 
-    with st.spinner("Lade Produktdaten…"):
-        q_df = _q_load(sel_country, q_store, sel_cat, q_n)
+    with st.spinner("Lade & bereinige Produktdaten…"):
+        q_raw = _q_load(sel_country, q_store, sel_cat, q_n)
+        q_df, q_report = _apply_quality(q_raw)
+
+    # ── Quality Report ────────────────────────────────────────────────────────
+    st.markdown('<div class="section-header">🛡️ Datenqualitäts-Report (letzter Datenabruf)</div>', unsafe_allow_html=True)
+    rq1, rq2, rq3, rq4, rq5 = st.columns(5)
+    rq1.metric("Datensätze gesamt",           str(q_report["n_total"]))
+    rq2.metric("✅ Marken korrigiert",         str(q_report["n_brand_fixed"]),
+               help="Markenname wurde per Produktname-Keyword überschrieben")
+    rq3.metric("✅ Kategorien normiert",       str(q_report["n_cat_fixed"]),
+               help="Kategorie wurde per Rule-based Engine neu gesetzt")
+    rq4.metric("🔄 Preise getauscht",          str(q_report["n_price_swapped"]),
+               help="Promo > Regulär → Werte wurden getauscht (Extraktionsfehler)")
+    rq5.metric("🚫 Fehlerhafte Datensätze",    str(q_report["n_excluded"]),
+               delta=f"-{q_report['n_excluded']} ausgeschlossen" if q_report["n_excluded"] > 0 else None,
+               delta_color="inverse",
+               help="Preis-Anomalie: nach Tausch immer noch logisch falsch → aus Anzeige entfernt")
+
+    st.caption(
+        f"**Datenqualitätsrate: "
+        f"{(q_report['n_clean'] / max(q_report['n_total'], 1) * 100):.1f} %** "
+        f"({q_report['n_clean']} von {q_report['n_total']} Datensätzen bestehen Qualitätscheck)"
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
 
     if not q_df.empty:
         q_show = q_df[[c for c in [
             "store_name", "name", "brand", "price_eur", "original_price_eur",
-            "currency", "discount_label", "category_l1", "country_code",
-            "valid_from", "valid_until",
+            "discount_pct", "currency", "category_de", "country_code",
+            "valid_from", "valid_until", "discount_label",
         ] if c in q_df.columns]].copy()
-        if "category_l1" in q_show.columns:
-            q_show["Kategorie DE"] = q_show["category_l1"].apply(cat_de)
+        if "category_de" not in q_show.columns and "category_l1" in q_df.columns:
+            q_show["category_de"] = q_df["category_l1"].apply(cat_de)
         q_show = q_show.rename(columns={
-            "store_name": "Händler", "name": "Produkt", "brand": "Marke",
+            "store_name": "Händler", "name": "Produkt", "brand": "Marke (bereinigt)",
             "price_eur": "Preis (€)", "original_price_eur": "Orig.-Preis (€)",
-            "currency": "Währung", "discount_label": "Rabatt",
-            "category_l1": "Kategorie", "country_code": "Markt",
-            "valid_from": "Von", "valid_until": "Bis",
+            "discount_pct": "Rabatt %", "currency": "Währung",
+            "category_de": "Kategorie DE", "country_code": "Markt",
+            "valid_from": "Von", "valid_until": "Bis", "discount_label": "Rabatt-Label",
         })
         q_cfg: dict = {}
         if "Preis (€)" in q_show.columns:
             q_cfg["Preis (€)"] = st.column_config.NumberColumn("Preis (€)", format="%.2f €")
         if "Orig.-Preis (€)" in q_show.columns:
             q_cfg["Orig.-Preis (€)"] = st.column_config.NumberColumn("Orig.-Preis (€)", format="%.2f €")
+        if "Rabatt %" in q_show.columns:
+            q_cfg["Rabatt %"] = st.column_config.NumberColumn("Rabatt %", format="%.1f %%")
 
         st.dataframe(q_show, column_config=q_cfg, use_container_width=True, hide_index=True, height=350)
 

@@ -13,6 +13,7 @@ from functools import lru_cache
 from typing import Any
 
 from .config import settings
+from .quality import run_quality_pipeline
 
 # Spalten-Select für die products-Tabelle
 _PRODUCT_COLS = (
@@ -105,8 +106,9 @@ def load_products(
         resp = q.order("created_at", desc=True).limit(limit).execute()
         if not resp.data:
             return _mock_products(limit)
-        df = pd.DataFrame(resp.data)
-        return _normalize(df)
+        df = _normalize(pd.DataFrame(resp.data))
+        df, _ = run_quality_pipeline(df)
+        return df
     except Exception:
         return _mock_products(limit)
 
@@ -145,7 +147,9 @@ def load_active_promos(
         resp = q.order("price", desc=False).limit(limit).execute()
         if not resp.data:
             return _mock_products(50)
-        return _normalize(pd.DataFrame(resp.data))
+        df = _normalize(pd.DataFrame(resp.data))
+        df, _ = run_quality_pipeline(df)
+        return df
     except Exception:
         return _mock_products(50)
 
