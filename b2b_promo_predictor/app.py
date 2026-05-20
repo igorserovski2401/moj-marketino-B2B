@@ -37,7 +37,7 @@ from src.database import (
 )
 from src.features import create_features
 from src.matching import ProductMatcher
-from src.model import get_feature_importance, predict, train_lgbm
+from src.model import forecast_price_trend, get_feature_importance, predict, train_lgbm
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -546,6 +546,103 @@ with tab3:
             )
     else:
         st.info("Keine Preishistorie gefunden. Versuche einen anderen Suchbegriff.")
+
+    # ── Prophet Preistrend-Prognose ───────────────────────────────────────────
+    st.divider()
+    st.markdown("#### 🔮 Prophet Preistrend-Prognose")
+    st.caption(
+        "Meta Prophet modelliert Saisonalität & Trend und prognostiziert den Preisverlauf. "
+        "Erwartete Preissturz-Punkte werden automatisch annotiert."
+    )
+
+    pf1, pf2, pf3 = st.columns([3, 1, 1])
+    with pf1:
+        # Produktauswahl aus der Preishistorie
+        if not hist_df.empty and "product_name" in hist_df.columns:
+            available_products = sorted(hist_df["product_name"].dropna().unique().tolist())
+        else:
+            available_products = []
+
+        if available_products:
+            forecast_product = st.selectbox(
+                "Produkt für Prognose",
+                ["— automatisch (alle Daten) —"] + available_products,
+                key="prophet_product",
+            )
+            forecast_product_val = None if forecast_product.startswith("—") else forecast_product
+        else:
+            st.caption("Suche zuerst ein Produkt oben, um eine Auswahl zu erhalten.")
+            forecast_product_val = search_term or None
+
+    with pf2:
+        forecast_periods = st.slider("Prognose-Tage", 7, 90, 30, key="prophet_periods")
+
+    with pf3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        run_forecast = st.button("▶ Prognose starten", type="primary", use_container_width=True)
+
+    # Prognose ausführen (sofort beim ersten Laden oder auf Button-Klick)
+    if run_forecast or True:
+        with st.spinner("Prophet-Modell trainiert…"):
+            prophet_fig, forecast_df = forecast_price_trend(
+                df=hist_df if not hist_df.empty else pd.DataFrame(),
+                product_id=forecast_product_val,
+                periods=forecast_periods,
+            )
+
+        st.plotly_chart(prophet_fig, use_container_width=True)
+
+        # Forecast-Insights
+        if not forecast_df.empty:
+            last_hist_price = hist_df["price"].iloc[-1] if not hist_df.empty and "price" in hist_df.columns else forecast_df["yhat"].iloc[0]
+            min_idx     = forecast_df["yhat"].idxmin()
+            max_idx     = forecast_df["yhat"].idxmax()
+            end_price   = forecast_df["yhat"].iloc[-1]
+            min_price   = forecast_df["yhat"].min()
+            drop_pct    = (last_hist_price - min_price) / last_hist_price * 100 if last_hist_price else 0
+
+            fi1, fi2, fi3, fi4 = st.columns(4)
+            for col, label, val, delta in [
+                (fi1, f"Preis in {forecast_periods} Tagen", f"{end_price:.2f} €",
+                 f"{'▼' if end_price < last_hist_price else '▲'} {abs(end_price - last_hist_price):.2f} € vs. heute"),
+                (fi2, "Erwarteter Tiefpunkt",
+                 f"{min_price:.2f} €",
+                 f"{forecast_df['ds'].iloc[min_idx].strftime('%d.%m.%Y')}"),
+                (fi3, "Erwarteter Höchstpreis",
+                 f"{forecast_df['yhat'].max():.2f} €",
+                 f"{forecast_df['ds'].iloc[max_idx].strftime('%d.%m.%Y')}"),
+                (fi4, "Max. erwarteter Preissturz",
+                 f"{drop_pct:.1f} %",
+                 "Ø vs. Tiefpunkt"),
+            ]:
+                col.markdown(
+                    f"""<div class="kpi-card">
+                      <div class="kpi-label">{label}</div>
+                      <div class="kpi-value">{val}</div>
+                      <div class="kpi-delta">{delta}</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Forecast-Tabelle (kompakt, zusammenklappbar)
+            with st.expander("📋 Rohdaten der Prognose anzeigen"):
+                fc_display = forecast_df.copy()
+                fc_display["ds"] = fc_display["ds"].dt.strftime("%d.%m.%Y")
+                st.dataframe(
+                    fc_display.rename(columns={
+                        "ds": "Datum",
+                        "yhat": "Prognose (€)",
+                        "yhat_lower": "Untergrenze (€)",
+                        "yhat_upper": "Obergrenze (€)",
+                    }).style.format({
+                        "Prognose (€)": "{:.3f}",
+                        "Untergrenze (€)": "{:.3f}",
+                        "Obergrenze (€)": "{:.3f}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
 
     st.divider()
 
