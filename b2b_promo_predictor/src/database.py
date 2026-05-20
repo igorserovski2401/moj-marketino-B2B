@@ -18,8 +18,17 @@ from .config import settings
 _PRODUCT_COLS = (
     "id,name,brand,price,original_price,store_name,country_code,"
     "valid_from,valid_until,category_l1,category_l2,unit,amount,"
-    "discount_label,promotion_type,approval_status,image_url,created_at"
+    "discount_label,promotion_type,approval_status,image_url,created_at,currency"
 )
+
+# Wechselkurse → EUR (approximative Festwerte)
+_FX_TO_EUR: dict[str, float] = {
+    "EUR": 1.0,
+    "MKD": 1 / 61.5,   # 1 EUR ≈ 61.5 MKD
+    "RSD": 1 / 117.0,  # 1 EUR ≈ 117 RSD
+    "BAM": 1 / 1.956,  # 1 EUR ≈ 1.956 BAM (fester Kurs)
+    "HRK": 1 / 7.534,  # historisch, Kroatien ist seit 2023 EUR
+}
 
 # Länder-Namen-Map
 COUNTRY_NAMES: dict[str, str] = {
@@ -306,7 +315,7 @@ def get_distinct_categories(country_code: str | None = None) -> list[str]:
 # ── Normalisierung ────────────────────────────────────────────────────────────
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
-    """Normiert Spaltentypen für konsistente Downstream-Verarbeitung."""
+    """Normiert Spaltentypen und rechnet Preise auf EUR um."""
     for col in ["valid_from", "valid_until"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -315,10 +324,20 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Discount-Tiefe berechnen wenn möglich
-    if "price" in df.columns and "original_price" in df.columns:
+    # Preise auf EUR normieren (Währungsspalte bleibt für Anzeige erhalten)
+    if "currency" in df.columns and "price" in df.columns:
+        fx = df["currency"].map(_FX_TO_EUR).fillna(1.0)
+        df["price_eur"] = (df["price"] * fx).round(2)
+        if "original_price" in df.columns:
+            df["original_price_eur"] = (df["original_price"] * fx).round(2)
+    else:
+        df["price_eur"] = df.get("price", np.nan)
+        df["original_price_eur"] = df.get("original_price", np.nan)
+
+    # Discount-Tiefe auf EUR-Basis
+    if "price_eur" in df.columns and "original_price_eur" in df.columns:
         df["discount_depth"] = (
-            1 - df["price"] / df["original_price"].replace(0, np.nan)
+            1 - df["price_eur"] / df["original_price_eur"].replace(0, np.nan)
         ).clip(0, 1).round(4)
     else:
         df["discount_depth"] = np.nan

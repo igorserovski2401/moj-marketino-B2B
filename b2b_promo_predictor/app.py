@@ -300,32 +300,31 @@ with tab1:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Saubere Anzeige-Tabelle
-        up_cols = {
-            "store_name": "Händler",
-            "name": "Produkt",
-            "brand": "Marke",
-            "price": "Promo-Preis",
-            "original_price": "Regulärpreis",
-            "category_l1": "Kategorie",
-            "country_code": "Markt",
-            "valid_from": "Start",
-            "valid_until": "Ende",
-            "discount_label": "Rabatt",
-        }
-        up_show = upcoming_df[[c for c in up_cols if c in upcoming_df.columns]].copy()
+        # Saubere Anzeige-Tabelle — Preise in EUR (normiert), Originalwährung als Hinweis
+        up_show = upcoming_df[[c for c in [
+            "store_name", "name", "brand", "price_eur", "original_price_eur",
+            "currency", "category_l1", "country_code", "valid_from", "valid_until",
+            "discount_label",
+        ] if c in upcoming_df.columns]].copy()
+
         if "discount_depth" in upcoming_df.columns:
             up_show["Rabatt %"] = (upcoming_df["discount_depth"] * 100).round(1)
 
-        up_show = up_show.rename(columns=up_cols)
+        up_show = up_show.rename(columns={
+            "store_name": "Händler", "name": "Produkt", "brand": "Marke",
+            "price_eur": "Promo-Preis (€)", "original_price_eur": "Regulärpreis (€)",
+            "currency": "Währung", "category_l1": "Kategorie",
+            "country_code": "Markt", "valid_from": "Start", "valid_until": "Ende",
+            "discount_label": "Rabatt",
+        })
         if "Kategorie" in up_show.columns:
             up_show["Kategorie DE"] = up_show["Kategorie"].apply(cat_de)
 
         col_cfg: dict = {}
-        if "Promo-Preis" in up_show.columns:
-            col_cfg["Promo-Preis"] = st.column_config.NumberColumn("Promo-Preis", format="%.2f €")
-        if "Regulärpreis" in up_show.columns:
-            col_cfg["Regulärpreis"] = st.column_config.NumberColumn("Regulärpreis", format="%.2f €")
+        if "Promo-Preis (€)" in up_show.columns:
+            col_cfg["Promo-Preis (€)"] = st.column_config.NumberColumn("Promo-Preis (€)", format="%.2f €")
+        if "Regulärpreis (€)" in up_show.columns:
+            col_cfg["Regulärpreis (€)"] = st.column_config.NumberColumn("Regulärpreis (€)", format="%.2f €")
         if "Rabatt %" in up_show.columns:
             col_cfg["Rabatt %"] = st.column_config.ProgressColumn(
                 "Rabatt %", min_value=0, max_value=70, format="%.1f %%",
@@ -447,28 +446,31 @@ with tab2:
     with st.spinner("Lade Preishistorie…"):
         hist_df = _hist(search_term, price_store_val, sel_country)
 
-    if not hist_df.empty and "recorded_at" in hist_df.columns and "price" in hist_df.columns:
+    # Preisspalte ermitteln (price_eur wenn vorhanden, sonst price)
+    _hist_price_col = "price_eur" if not hist_df.empty and "price_eur" in hist_df.columns else "price"
+
+    if not hist_df.empty and "recorded_at" in hist_df.columns and _hist_price_col in hist_df.columns:
         prod_label = search_term or "Alle Produkte"
         st.markdown(f'<div class="section-header">📈 Preisverlauf – {prod_label}</div>', unsafe_allow_html=True)
-        st.caption(f"{len(hist_df):,} Messpunkte")
+        st.caption(f"{len(hist_df):,} Messpunkte · Preise normiert auf EUR")
 
         retailers_hist = hist_df["retailer"].dropna().unique().tolist() if "retailer" in hist_df.columns else []
 
         if len(retailers_hist) > 1:
             fig_hist = px.line(
                 hist_df.sort_values("recorded_at"),
-                x="recorded_at", y="price",
+                x="recorded_at", y=_hist_price_col,
                 color="retailer",
                 markers=True,
-                labels={"recorded_at": "Datum", "price": "Preis (€)", "retailer": "Händler"},
+                labels={"recorded_at": "Datum", _hist_price_col: "Preis (€)", "retailer": "Händler"},
             )
         else:
             fig_hist = px.area(
                 hist_df.sort_values("recorded_at"),
-                x="recorded_at", y="price",
+                x="recorded_at", y=_hist_price_col,
                 markers=True,
                 color_discrete_sequence=[PRIMARY],
-                labels={"recorded_at": "Datum", "price": "Preis (€)"},
+                labels={"recorded_at": "Datum", _hist_price_col: "Preis (€)"},
             )
 
         fig_hist.update_layout(
@@ -483,11 +485,12 @@ with tab2:
 
         # Preis-KPIs
         h1, h2, h3, h4 = st.columns(4)
-        avg_p = hist_df["price"].mean()
-        min_p = hist_df["price"].min()
-        max_p = hist_df["price"].max()
-        last_p = hist_df.sort_values("recorded_at")["price"].iloc[-1]
-        trend = last_p - hist_df.sort_values("recorded_at")["price"].iloc[0]
+        _pseries = hist_df[_hist_price_col]
+        avg_p = _pseries.mean()
+        min_p = _pseries.min()
+        max_p = _pseries.max()
+        last_p = hist_df.sort_values("recorded_at")[_hist_price_col].iloc[-1]
+        trend = last_p - hist_df.sort_values("recorded_at")[_hist_price_col].iloc[0]
         trend_str = f"{'▲' if trend > 0 else '▼'} {abs(trend):.2f} € Trend"
 
         for col, label, val, delta, css in [
@@ -555,9 +558,10 @@ with tab2:
                 else:
                     # Sicher auf Index zugreifen — reset_index verhindert iloc-Fehler
                     fc = forecast_df.reset_index(drop=True)
+                    _price_col = "price_eur" if "price_eur" in hist_df.columns else "price"
                     last_hist_price = (
-                        hist_df["price"].iloc[-1]
-                        if not hist_df.empty and "price" in hist_df.columns
+                        hist_df[_price_col].iloc[-1]
+                        if not hist_df.empty and _price_col in hist_df.columns
                         else fc["yhat"].iloc[0]
                     )
 
@@ -636,8 +640,9 @@ with tab2:
 
     price_dist_df = _price_dist(sel_country, price_store_val, sel_cat)
 
-    if not price_dist_df.empty and "price" in price_dist_df.columns and "category_l1" in price_dist_df.columns:
-        price_clean = price_dist_df.dropna(subset=["price", "category_l1"])
+    _box_price_col = "price_eur" if not price_dist_df.empty and "price_eur" in price_dist_df.columns else "price"
+    if not price_dist_df.empty and _box_price_col in price_dist_df.columns and "category_l1" in price_dist_df.columns:
+        price_clean = price_dist_df.dropna(subset=[_box_price_col, "category_l1"])
         if not price_clean.empty:
             top_cats = price_clean["category_l1"].value_counts().head(8).index.tolist()
             price_filtered = price_clean[price_clean["category_l1"].isin(top_cats)].copy()
@@ -646,9 +651,9 @@ with tab2:
             )
             fig_box = px.box(
                 price_filtered,
-                x="Kategorie", y="price",
+                x="Kategorie", y=_box_price_col,
                 color="Kategorie",
-                labels={"price": "Preis (€)"},
+                labels={_box_price_col: "Preis (€)"},
                 color_discrete_sequence=px.colors.qualitative.Set2,
             )
             fig_box.update_layout(
@@ -739,29 +744,25 @@ with tab3:
         q_df = _q_load(sel_country, q_store, sel_cat, q_n)
 
     if not q_df.empty:
-        q_disp_cols = {
-            "store_name": "Händler",
-            "name": "Produkt",
-            "brand": "Marke",
-            "price": "Preis",
-            "original_price": "Orig.-Preis",
-            "category_l1": "Kategorie",
-            "country_code": "Markt",
-            "valid_from": "Von",
-            "valid_until": "Bis",
-            "discount_label": "Rabatt",
-        }
-        q_show = q_df[[c for c in q_disp_cols if c in q_df.columns]].rename(columns=q_disp_cols).copy()
-        if "Kategorie" in q_show.columns:
-            q_show["Kategorie DE"] = q_show["Kategorie"].apply(cat_de)
-
+        q_show = q_df[[c for c in [
+            "store_name", "name", "brand", "price_eur", "original_price_eur",
+            "currency", "discount_label", "category_l1", "country_code",
+            "valid_from", "valid_until",
+        ] if c in q_df.columns]].copy()
+        if "category_l1" in q_show.columns:
+            q_show["Kategorie DE"] = q_show["category_l1"].apply(cat_de)
+        q_show = q_show.rename(columns={
+            "store_name": "Händler", "name": "Produkt", "brand": "Marke",
+            "price_eur": "Preis (€)", "original_price_eur": "Orig.-Preis (€)",
+            "currency": "Währung", "discount_label": "Rabatt",
+            "category_l1": "Kategorie", "country_code": "Markt",
+            "valid_from": "Von", "valid_until": "Bis",
+        })
         q_cfg: dict = {}
-        if "Preis" in q_show.columns:
-            q_show["Preis"] = pd.to_numeric(q_show["Preis"], errors="coerce")
-            q_cfg["Preis"] = st.column_config.NumberColumn("Preis", format="%.2f €")
-        if "Orig.-Preis" in q_show.columns:
-            q_show["Orig.-Preis"] = pd.to_numeric(q_show["Orig.-Preis"], errors="coerce")
-            q_cfg["Orig.-Preis"] = st.column_config.NumberColumn("Orig.-Preis", format="%.2f €")
+        if "Preis (€)" in q_show.columns:
+            q_cfg["Preis (€)"] = st.column_config.NumberColumn("Preis (€)", format="%.2f €")
+        if "Orig.-Preis (€)" in q_show.columns:
+            q_cfg["Orig.-Preis (€)"] = st.column_config.NumberColumn("Orig.-Preis (€)", format="%.2f €")
 
         st.dataframe(q_show, column_config=q_cfg, use_container_width=True, hide_index=True, height=350)
 
