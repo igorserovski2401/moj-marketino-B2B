@@ -69,9 +69,9 @@ if not APP_VERSION:
         APP_VERSION = check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(Path(__file__).parent.parent), stderr=DEVNULL,
-        ).decode().strip() or "local-dev"
+        ).decode().strip() or "45bd04a"
     except Exception:
-        APP_VERSION = "local-dev"
+        APP_VERSION = "45bd04a"
 
 CACHE_VERSION: str = APP_VERSION
 
