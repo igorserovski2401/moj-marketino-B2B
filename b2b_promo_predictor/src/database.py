@@ -175,6 +175,40 @@ def load_upcoming_promos(
     )
 
 
+def load_promo_history_for_forecast(
+    country_code: str | None = None,
+    category_l1: str | None = None,
+    days_back: int = 365,
+    limit: int = 5000,
+) -> pd.DataFrame:
+    """Lädt historische + aktuelle Aktionen für die Forecast-Berechnung.
+
+    Anders als `load_products` wird kein Sortier-/Anzeige-Limit auf wenige
+    aktuelle Datensätze gelegt – die ganze 12-Monats-Historie ist nötig
+    damit Aktionszyklen und Preistrends berechnet werden können.
+    """
+    client = get_client()
+    if client is None:
+        return _mock_promo_history()
+
+    since = (date.today() - timedelta(days=days_back)).isoformat()
+    try:
+        q = _safe_query(client, "products", _PRODUCT_COLS)
+        if country_code:
+            q = q.eq("country_code", country_code)
+        if category_l1:
+            q = q.eq("category_l1", category_l1)
+        q = q.gte("valid_from", since).not_.is_("valid_from", "null")
+        resp = q.order("valid_from", desc=False).limit(limit).execute()
+        if not resp.data:
+            return pd.DataFrame()
+        df = _normalize(pd.DataFrame(resp.data))
+        df, _ = run_quality_pipeline(df)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def load_active_promos(
     country_code: str | None = None,
     limit: int = 300,
@@ -454,6 +488,84 @@ def _mock_products(n: int = 20) -> pd.DataFrame:
         "created_at": today.isoformat(),
         "discount_depth": rng.uniform(0.05, 0.40, n).round(4),
     })
+
+
+def _mock_promo_history() -> pd.DataFrame:
+    """Synthetische Promo-Historie für Demo-Modus.
+
+    Erzeugt 6 Produkt × 3 Händler-Kombinationen mit jeweils 5–8 historischen
+    Aktionen über die letzten 12 Monate, damit die Forecast-Engine
+    sinnvolle Zyklen erkennen kann.
+    """
+    rng = np.random.default_rng(2026)
+    products = [
+        ("Red Bull 250ml", "Red Bull", "Piće", "Getränke / Energy"),
+        ("Milka Schokolade 300g", "Milka / Mondelez", "Slatkiši", "Süßwaren & Snacks"),
+        ("Coca-Cola 1,5L", "Coca-Cola", "Piće", "Getränke"),
+        ("Nutella 450g", "Ferrero", "Slatkiši", "Süßwaren & Snacks"),
+        ("Ariel Pods 35 Kom.", "P&G", "Kozmetika", "Drogerie & Waschmittel"),
+        ("Haribo Goldbären 200g", "Haribo", "Slatkiši", "Süßwaren & Snacks"),
+        ("Pampers Gr.3 44 Stk.", "P&G", "Dječja hrana", "Babyprodukte"),
+        ("Vegeta 500g", "Podravka", "Hrana", "Lebensmittel"),
+    ]
+    retailers = ["Konzum", "Kaufland", "Lidl", "Spar", "Bingo", "Tinex"]
+    countries = ["HR", "SI", "BA", "RS", "MK"]
+
+    today = pd.Timestamp.today().normalize()
+    rows: list[dict] = []
+    pid = 0
+
+    for product, brand, cat_l1, cat_de in products:
+        chosen_retailers = rng.choice(retailers, 3, replace=False)
+        for retailer in chosen_retailers:
+            country = str(rng.choice(countries))
+            n_promos = int(rng.integers(5, 9))
+            base_price = float(rng.uniform(1.0, 5.0))
+            cycle_days = int(rng.integers(35, 60))
+
+            for i in range(n_promos):
+                # Älteste Aktion zuerst, gleichmäßige Zyklen mit Jitter
+                offset = (n_promos - i) * cycle_days + int(rng.integers(-5, 5))
+                start = today - pd.Timedelta(days=max(offset, 0))
+                duration = int(rng.integers(5, 11))
+                end = start + pd.Timedelta(days=duration)
+
+                # Leichter Preis-Drift (steigend, fallend oder stabil je Produkt)
+                drift = rng.uniform(-0.04, 0.06)
+                price_factor = 1.0 + drift * (i / max(n_promos - 1, 1))
+                orig_price = round(base_price * 1.0, 2)
+                promo_price = round(base_price * 0.75 * price_factor, 2)
+                disc_pct = round((1 - promo_price / orig_price) * 100, 1)
+
+                rows.append({
+                    "id": f"mock-{pid}",
+                    "name": product,
+                    "brand": brand,
+                    "price": promo_price,
+                    "original_price": orig_price,
+                    "price_eur": promo_price,
+                    "original_price_eur": orig_price,
+                    "store_name": retailer,
+                    "country_code": country,
+                    "valid_from": start,
+                    "valid_until": end,
+                    "category_l1": cat_l1,
+                    "category_de": cat_de,
+                    "category_l2": None,
+                    "unit": "Stk",
+                    "amount": 1.0,
+                    "discount_label": f"-{int(disc_pct)}%",
+                    "discount_pct": disc_pct,
+                    "discount_depth": round(disc_pct / 100, 4),
+                    "promotion_type": "promo",
+                    "approval_status": "approved",
+                    "image_url": None,
+                    "created_at": today.isoformat(),
+                    "currency": "EUR",
+                })
+                pid += 1
+
+    return pd.DataFrame(rows)
 
 
 def _mock_price_history(product_name: str = "Bio Vollmilch 1L") -> pd.DataFrame:
