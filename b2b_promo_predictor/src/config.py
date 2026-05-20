@@ -13,8 +13,11 @@ class Settings:
     """Application-wide settings resolved from environment variables."""
 
     # Supabase
-    supabase_url: str | None = os.getenv("SUPABASE_URL")
-    supabase_anon_key: str | None = os.getenv("SUPABASE_ANON_KEY")
+    supabase_url: str | None = os.getenv("SUPABASE_URL", "https://uddnrppybsooxsasvkev.supabase.co")
+    supabase_anon_key: str | None = os.getenv(
+        "SUPABASE_ANON_KEY",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkZG5ycHB5YnNvb3hzYXN2a2V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMxOTA4MDUsImV4cCI6MjA3ODc2NjgwNX0.RQHaA1m7pNm0cJPQQRPSP4KpDvsQGMAOO4MDuQbZz5E",
+    )
 
     # Gemini
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
