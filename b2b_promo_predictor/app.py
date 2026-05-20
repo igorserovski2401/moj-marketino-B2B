@@ -825,7 +825,7 @@ with tab1:
                     .size().reset_index(name="Anzahl")
                 )
                 if _tree_cat != "category_de":
-                    treemap_df["category_de"] = treemap_df[_tree_cat].apply(cat_de)
+                    treemap_df["category_de"] = treemap_df[_tree_cat].apply(cat_local)
                     _tree_cat = "category_de"
                 fig_tree = px.treemap(
                     treemap_df,
@@ -1120,7 +1120,7 @@ with tab2:
             top_cats = price_clean["category_l1"].value_counts().head(8).index.tolist()
             price_filtered = price_clean[price_clean["category_l1"].isin(top_cats)].copy()
             price_filtered["Kategorie"] = price_filtered["category_l1"].apply(
-                lambda x: f"{cat_de(x)} ({x})" if cat_de(x) != x else x
+                lambda x: f"{cat_local(x)} ({x})" if cat_local(x) != x else x
             )
             fig_box = px.box(
                 price_filtered,
@@ -1246,7 +1246,7 @@ with tab3:
             "valid_from", "valid_until", "discount_label",
         ] if c in q_df.columns]].copy()
         if "category_de" not in q_show.columns and "category_l1" in q_df.columns:
-            q_show["category_de"] = q_df["category_l1"].apply(cat_de)
+            q_show["category_de"] = q_df["category_l1"].apply(cat_local)
         q_show = q_show.rename(columns={
             "store_name": "Händler", "name": "Produkt", "brand": "Marke (bereinigt)",
             "price_eur": "Preis (€)", "original_price_eur": "Orig.-Preis (€)",
@@ -1274,7 +1274,7 @@ with tab3:
     cat_df = _cat_dist(sel_country)
 
     if not cat_df.empty:
-        cat_df["Kategorie DE"] = cat_df["category_l1"].apply(cat_de)
+        cat_df["Kategorie DE"] = cat_df["category_l1"].apply(cat_local)
         cat_df["label"] = cat_df.apply(
             lambda r: f"{r['Kategorie DE']} ({r['category_l1']})" if r["Kategorie DE"] != r["category_l1"] else r["category_l1"],
             axis=1,
@@ -1407,7 +1407,7 @@ with tab3:
                 cal_clean = cal_clean.sort_values("valid_from").copy()
 
             if "category_l1" in cal_clean.columns:
-                cal_clean["Kategorie"] = cal_clean["category_l1"].apply(cat_de)
+                cal_clean["Kategorie"] = cal_clean["category_l1"].apply(cat_local)
             if "store_name" in cal_clean.columns:
                 fig_gantt = px.timeline(
                     cal_clean,
