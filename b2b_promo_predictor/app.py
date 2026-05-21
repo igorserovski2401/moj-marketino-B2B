@@ -22,8 +22,8 @@ from src.database import (
     get_client,
     get_distinct_categories,
     get_distinct_stores,
+    load_active_promos,
     load_promo_history_for_forecast,
-    load_upcoming_promos,
     normalize_retailer_name,
 )
 from src.i18n import (
@@ -418,11 +418,15 @@ st.markdown(
 )
 
 # ── Data loading ──────────────────────────────────────────────────────────────
+# Active promos: valid_from <= today <= valid_until (the real snapshot)
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_upcoming(country, _v=CACHE_VERSION):
-    return load_upcoming_promos(
-        country_code=country, days_ahead=21, limit=500, allow_mock=demo_mode,
+def _load_active(country, cat, _v=CACHE_VERSION):
+    return load_active_promos(
+        country_code=country,
+        category_l1=cat,
+        limit=2000,
+        allow_mock=demo_mode,
     )
 
 
@@ -439,20 +443,19 @@ def _load_retailers(country, _v=CACHE_VERSION):
 
 
 with st.spinner(t("general.loading", ui_lang)):
-    _upcoming_raw      = _load_upcoming(sel_country)
-    _history_raw       = _load_history(sel_country, sel_cat)
+    _active_raw           = _load_active(sel_country, sel_cat)
+    _history_raw          = _load_history(sel_country, sel_cat)
     _normalized_retailers = _load_retailers(sel_country)
 
-# ── Global filter on upcoming promos (drives KPI row) ────────────────────────
-
+# Apply brand text-search on top of DB result
 _filtered_promos, _filter_audit = build_filtered_view(
-    _upcoming_raw,
+    _active_raw,
     country=sel_country,
     category=sel_cat,
     brand_query=brand_filter,
 )
 
-# ── KPI row — filter-based, not global DB stats ───────────────────────────────
+# ── KPI row — from currently active promos ────────────────────────────────────
 
 _n_promos    = len(_filtered_promos)
 _n_retailers = (
@@ -468,13 +471,20 @@ _avg_disc    = (
     if "discount_pct" in _filtered_promos.columns and not _filtered_promos.empty
     else float("nan")
 )
+_max_disc    = (
+    _filtered_promos["discount_pct"].dropna().max()
+    if "discount_pct" in _filtered_promos.columns and not _filtered_promos.empty
+    else float("nan")
+)
 
 k1, k2, k3, k4 = st.columns(4)
 for _col, _label, _val, _sub in [
     (k1, t("kpi.active_promos_week", ui_lang), f"{_n_promos:,}".replace(",", "."), market_label),
     (k2, t("kpi.active_retailers", ui_lang),   str(_n_retailers),                  ""),
     (k3, t("kpi.observed_products", ui_lang),  str(_n_brands),                     ""),
-    (k4, t("kpi.avg_discount", ui_lang),       f"{_avg_disc:.0f} %" if pd.notna(_avg_disc) else "—", ""),
+    (k4, t("kpi.avg_discount", ui_lang),
+     f"{_avg_disc:.0f} %" if pd.notna(_avg_disc) else "—",
+     f"max {_max_disc:.0f} %" if pd.notna(_max_disc) else ""),
 ]:
     _col.markdown(
         f"""<div class="kpi-card">
@@ -506,75 +516,105 @@ with tab_monitor:
     st.caption(t("monitor.subtitle", ui_lang))
 
     _mon_df = _filtered_promos.copy()
-    if not _mon_df.empty:
-        _mon_df["__dq"] = _mon_df.apply(_dq_badge, axis=1)
 
-    # DQ filter checkboxes
-    _mf1, _mf2, _mf3 = st.columns(3)
-    _mon_real_disc  = _mf1.checkbox(t("monitor.filter_real_discount", ui_lang), value=False, key="mon_real_disc")
-    _mon_with_brand = _mf2.checkbox(t("monitor.filter_with_brand", ui_lang),   value=False, key="mon_brand")
-    _mon_reliable   = _mf3.checkbox(t("monitor.filter_reliable", ui_lang),      value=False, key="mon_reliable")
+    # ── Retailer filter inside tab ────────────────────────────────────────────
+    _tf1, _tf2, _tf3 = st.columns([2, 2, 1])
+    with _tf1:
+        _mon_retailer_opts = [t("sidebar.all_markets", ui_lang)] + _normalized_retailers
+        _mon_ret_idx = st.selectbox(
+            t("monitor.col_retailer", ui_lang),
+            range(len(_mon_retailer_opts)),
+            format_func=lambda i: _mon_retailer_opts[i],
+            key="mon_retailer",
+        )
+        _mon_retailer = None if _mon_ret_idx == 0 else _mon_retailer_opts[_mon_ret_idx]
+    with _tf2:
+        _mon_search = st.text_input(
+            t("monitor.col_product", ui_lang),
+            placeholder="Coca-Cola, Milka, Podravka…",
+            key="mon_search",
+        )
+    with _tf3:
+        _mon_only_disc = st.checkbox(
+            t("monitor.filter_real_discount", ui_lang), value=True, key="mon_real_disc",
+        )
 
-    if not _mon_df.empty:
-        if _mon_real_disc and "discount_pct" in _mon_df.columns:
-            _mon_df = _mon_df[_mon_df["discount_pct"].fillna(0) > 0]
-        if _mon_with_brand:
-            _bc = "brand_clean" if "brand_clean" in _mon_df.columns else "brand"
-            if _bc in _mon_df.columns:
-                _mon_df = _mon_df[_mon_df[_bc].notna() & (_mon_df[_bc] != "")]
-        if _mon_reliable and "match_score" in _mon_df.columns:
-            _mon_df = _mon_df[_mon_df["match_score"].fillna(0) >= MIN_MATCH_SCORE]
+    # Apply in-tab filters
+    if _mon_retailer and "store_name" in _mon_df.columns:
+        _mon_df = _mon_df[_mon_df["store_name"] == _mon_retailer]
+    if _mon_search:
+        _mon_df = _text_search(_mon_df, _mon_search)
+    if _mon_only_disc and "discount_pct" in _mon_df.columns:
+        _mon_df = _mon_df[_mon_df["discount_pct"].fillna(0) > 0]
 
     if _mon_df.empty:
         _empty_state(t("monitor.no_data", ui_lang))
     else:
-        _dq_counts  = _mon_df["__dq"].value_counts() if "__dq" in _mon_df.columns else pd.Series(dtype=int)
-        _n_complete = int(_dq_counts.get("complete", 0))
-        _n_total    = len(_mon_df)
-        _pct        = _n_complete / max(_n_total, 1) * 100
-
-        _dm1, _dm2, _dm3 = st.columns(3)
-        _dm1.metric(t("dq.total_records", ui_lang),    str(_n_total))
-        _dm2.metric(t("dq.complete_pct", ui_lang),     f"{_pct:.0f} %")
-        _dm3.metric(
-            t("dq.avg_match_score", ui_lang),
-            f"{_mon_df['match_score'].mean():.2f}" if "match_score" in _mon_df.columns else "—",
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        _DQ_LABEL = {
-            "complete":      t("monitor.dq_complete", ui_lang),
-            "no_brand":      t("monitor.dq_no_brand", ui_lang),
-            "no_regular":    t("monitor.dq_no_regular", ui_lang),
-            "no_discount":   t("monitor.dq_no_discount", ui_lang),
-            "cat_uncertain": t("monitor.dq_cat_uncertain", ui_lang),
-            "low_match":     t("monitor.dq_low_match", ui_lang),
-        }
-
+        # ── Per-retailer discount bar chart (Nielsen IQ style) ────────────────
         _price_col = "price_eur" if "price_eur" in _mon_df.columns else "price"
         _orig_col  = "original_price_eur" if "original_price_eur" in _mon_df.columns else "original_price"
 
+        if (
+            "store_name" in _mon_df.columns
+            and "discount_pct" in _mon_df.columns
+            and len(_mon_df["store_name"].dropna().unique()) > 1
+            and not _mon_retailer
+        ):
+            _chart_data = (
+                _mon_df.groupby("store_name", as_index=False)
+                .agg(
+                    avg_disc=("discount_pct", "mean"),
+                    sku_count=("name", "count"),
+                )
+                .sort_values("avg_disc", ascending=False)
+                .head(15)
+            )
+            _fig_bar = px.bar(
+                _chart_data,
+                x="store_name",
+                y="avg_disc",
+                text="sku_count",
+                labels={"store_name": t("monitor.col_retailer", ui_lang),
+                        "avg_disc": t("kpi.avg_discount", ui_lang),
+                        "sku_count": "SKUs"},
+                color="avg_disc",
+                color_continuous_scale=["#DBEAFE", "#1A56DB"],
+                title=t("monitor.title", ui_lang) + f" — {market_label}",
+            )
+            _fig_bar.update_layout(
+                showlegend=False,
+                coloraxis_showscale=False,
+                margin=dict(t=40, b=10, l=0, r=0),
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                xaxis=dict(showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor="#F3F4F6", ticksuffix=" %"),
+            )
+            _fig_bar.update_traces(texttemplate="%{text}", textposition="outside")
+            st.plotly_chart(_fig_bar, use_container_width=True)
+
+        # ── Table: Nielsen IQ column order ────────────────────────────────────
+        # Sort: retailer → discount desc (deepest deals first per retailer)
+        if "store_name" in _mon_df.columns and "discount_pct" in _mon_df.columns:
+            _mon_df = _mon_df.sort_values(
+                ["store_name", "discount_pct"], ascending=[True, False]
+            )
+
         _show_cols_src = [
-            ("name",         t("monitor.col_product", ui_lang)),
-            ("brand_clean",  t("monitor.col_brand", ui_lang)),
             ("store_name",   t("monitor.col_retailer", ui_lang)),
             ("country_code", t("monitor.col_market", ui_lang)),
             ("category_l1",  t("monitor.col_category", ui_lang)),
-            ("valid_from",   t("monitor.col_valid_from", ui_lang)),
+            ("brand_clean",  t("monitor.col_brand", ui_lang)),
+            ("name",         t("monitor.col_product", ui_lang)),
             ("valid_until",  t("monitor.col_valid_until", ui_lang)),
             ("discount_pct", t("monitor.col_discount", ui_lang)),
             (_price_col,     t("monitor.col_promo_price", ui_lang)),
             (_orig_col,      t("monitor.col_regular_price", ui_lang)),
             ("currency",     t("monitor.col_currency", ui_lang)),
-            ("__dq",         t("monitor.col_dq", ui_lang)),
         ]
         _avail_src = [(s, d) for s, d in _show_cols_src if s in _mon_df.columns]
         _mon_show  = _mon_df[[s for s, _ in _avail_src]].copy()
         _mon_show.columns = [d for _, d in _avail_src]
-
-        _dq_disp = t("monitor.col_dq", ui_lang)
-        if _dq_disp in _mon_show.columns:
-            _mon_show[_dq_disp] = _mon_show[_dq_disp].map(_DQ_LABEL).fillna("—")
 
         _cat_disp = t("monitor.col_category", ui_lang)
         if _cat_disp in _mon_show.columns:
@@ -587,15 +627,21 @@ with tab_monitor:
         _price_d = t("monitor.col_promo_price", ui_lang)
         _orig_d  = t("monitor.col_regular_price", ui_lang)
         if _disc_d in _mon_show.columns:
-            _cfg_mon[_disc_d] = st.column_config.NumberColumn(_disc_d, format="%.1f %%")
+            _cfg_mon[_disc_d] = st.column_config.ProgressColumn(
+                _disc_d, format="%.1f %%", min_value=0, max_value=100,
+            )
         if _price_d in _mon_show.columns:
             _cfg_mon[_price_d] = st.column_config.NumberColumn(_price_d, format="%.2f")
         if _orig_d in _mon_show.columns:
             _cfg_mon[_orig_d] = st.column_config.NumberColumn(_orig_d, format="%.2f")
 
+        st.markdown(
+            f"**{len(_mon_show):,} SKUs** · {int(_mon_df['store_name'].nunique() if 'store_name' in _mon_df.columns else 0)} {t('kpi.active_retailers', ui_lang)}".replace(",", "."),
+            unsafe_allow_html=False,
+        )
         st.dataframe(
             _mon_show, use_container_width=True, hide_index=True,
-            column_config=_cfg_mon, height=450,
+            column_config=_cfg_mon, height=520,
         )
 
         _csv_bytes = _mon_show.to_csv(index=False).encode("utf-8")

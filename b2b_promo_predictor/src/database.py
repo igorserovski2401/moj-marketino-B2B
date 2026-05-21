@@ -205,10 +205,15 @@ def load_promo_history_for_forecast(
 
 def load_active_promos(
     country_code: str | None = None,
-    limit: int = 300,
+    category_l1: str | None = None,
+    limit: int = 2000,
     allow_mock: bool = True,
 ) -> pd.DataFrame:
-    """Products active today (valid_from <= today <= valid_until)."""
+    """Currently active promotions: valid_from <= today <= valid_until.
+
+    Returns the full promotion snapshot for the Promo Monitor.
+    Sorted by store_name → category_l1 → brand so table rows cluster naturally.
+    """
     client = get_client()
     if client is None:
         return _mock_products(50) if allow_mock else pd.DataFrame()
@@ -219,7 +224,15 @@ def load_active_promos(
         q = q.lte("valid_from", today).gte("valid_until", today)
         if country_code:
             q = q.eq("country_code", country_code)
-        resp = q.order("price", desc=False).limit(limit).execute()
+        if category_l1:
+            q = q.eq("category_l1", category_l1)
+        resp = (
+            q.order("store_name", desc=False)
+            .order("category_l1", desc=False)
+            .order("brand", desc=False)
+            .limit(limit)
+            .execute()
+        )
         if not resp.data:
             return _mock_products(50) if allow_mock else pd.DataFrame()
         df = _normalize(pd.DataFrame(resp.data))
