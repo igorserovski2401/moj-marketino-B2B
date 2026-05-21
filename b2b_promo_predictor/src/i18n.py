@@ -399,6 +399,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "EN": "Justification", "HR": "Objašnjenje", "SL": "Utemeljitev",
         "BS": "Objašnjenje", "SR": "Objašnjenje", "MK": "Образложение", "ME": "Objašnjenje",
     },
+    "col.discount": {
+        "EN": "Discount %", "HR": "Popust %", "SL": "Popust %",
+        "BS": "Popust %", "SR": "Popust %", "MK": "Попуст %", "ME": "Popust %",
+    },
+    "col.signal": {
+        "EN": "Signal", "HR": "Signal", "SL": "Signal",
+        "BS": "Signal", "SR": "Signal", "MK": "Сигнал", "ME": "Signal",
+    },
     # ── Upcoming promotions ──
     "upcoming.title": {
         "EN": "Upcoming promotions", "HR": "Nadolazeće akcije", "SL": "Prihodnje akcije",
@@ -1828,6 +1836,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "SR": "Odaberi određeni proizvod, prodavnicu i tržište za pokretanje prognoze.",
         "MK": "Избери конкретен производ, продавница и пазар за да ја стартуваш прогнозата.",
         "ME": "Odaberi određeni proizvod, prodavnicu i tržište za pokretanje prognoze.",
+    },
+    "exp.eligibility_fail": {
+        "EN": "Not enough data for a reliable forecast. Need: product + retailer + market + ≥{min_obs} observations + ≥{min_days} days of history.",
+        "HR": "Nedovoljno podataka za pouzdanu prognozu. Potrebno: proizvod + trgovac + tržište + ≥{min_obs} opažanja + ≥{min_days} dana povijesti.",
+        "SL": "Premalo podatkov za zanesljivo napoved. Potrebno: izdelek + trgovec + trg + ≥{min_obs} opazovanj + ≥{min_days} dni zgodovine.",
+        "BS": "Nedovoljno podataka za pouzdanu prognozu. Potrebno: proizvod + trgovac + tržište + ≥{min_obs} opažanja + ≥{min_days} dana historije.",
+        "SR": "Nedovoljno podataka za pouzdanu prognozu. Potrebno: proizvod + trgovac + tržište + ≥{min_obs} opažanja + ≥{min_days} dana istorije.",
+        "MK": "Нема доволно податоци за сигурна прогноза. Потребно: производ + трговец + пазар + ≥{min_obs} набљудувања + ≥{min_days} денови историја.",
+        "ME": "Nedovoljno podataka za pouzdanu prognozu. Potrebno: proizvod + trgovac + tržište + ≥{min_obs} opažanja + ≥{min_days} dana istorije.",
+    },
+    "sidebar.preview_weeks": {
+        "EN": "Preview weeks", "HR": "Tjedni prikaza", "SL": "Tedni prikaza",
+        "BS": "Sedmice prikaza", "SR": "Sedmice prikaza", "MK": "Недели за преглед", "ME": "Sedmice prikaza",
     },
 }
 
