@@ -702,7 +702,7 @@ def apply_forecast_filters(
             | df["brand"].fillna("").str.lower().str.contains(q, regex=False)
         ]
 
-    if min_probability > 0:
+    if min_probability > 0 and "probability" in df.columns:
         df = df[df["probability"] >= min_probability]
 
     if signal and signal != "Alle":

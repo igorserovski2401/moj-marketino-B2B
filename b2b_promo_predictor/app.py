@@ -69,9 +69,9 @@ if not APP_VERSION:
         APP_VERSION = check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(Path(__file__).parent.parent), stderr=DEVNULL,
-        ).decode().strip() or "45bd04a"
+        ).decode().strip() or "fix-i18n-crash"
     except Exception:
-        APP_VERSION = "45bd04a"
+        APP_VERSION = "fix-i18n-crash"
 
 CACHE_VERSION: str = APP_VERSION
 
@@ -644,14 +644,9 @@ with tab1:
     # ── KAM-Tabelle ──────────────────────────────────────────────────────────
     if fc_df.empty:
         if fc_df_all.empty:
-            st.info(
-                "🔍 **Keine Produkt-Händler-Kombination hat ausreichende Historie für eine belastbare Prognose.**  \n"
-                f"Voraussetzung: mind. {MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER} historische Aktionen "
-                f"und {MIN_HISTORY_DAYS} Tage Historie. "
-                "Erweitere den Markt-Filter oder warte auf mehr Datenpunkte."
-            )
+            st.info(t("kam.no_history", ui_lang, n=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER, d=MIN_HISTORY_DAYS))
         else:
-            st.info("Keine Prognosen entsprechen den aktiven Filtern. Filter zurücksetzen oder erweitern.")
+            st.info(t("kam.no_filter_match", ui_lang))
     else:
         # Anzeigespalten zusammenstellen
         def _fmt_period(row):

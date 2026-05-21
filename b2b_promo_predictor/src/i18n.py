@@ -248,6 +248,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "SR": "Samo proizvodi sa dovoljno istorije", "MK": "Само производи со доволна историја",
         "ME": "Samo proizvodi sa dovoljno istorije",
     },
+    "kam.no_history": {
+        "EN": "🔍 **No product–retailer combination has sufficient history for a reliable forecast.**\nRequirement: at least {n} historical promotions and {d} days of history. Expand the market filter or wait for more data points.",
+        "HR": "🔍 **Nijedna kombinacija proizvod–prodavaonica nema dovoljno povijesti za pouzdanu prognozu.**\nUvjet: min. {n} historijskih akcija i {d} dana povijesti. Proširi filter tržišta ili pričekaj više podataka.",
+        "SL": "🔍 **Nobena kombinacija izdelek–trgovec nima zadostne zgodovine za zanesljivo napoved.**\nPogoj: min. {n} zgodovinskih akcij in {d} dni zgodovine. Razširi filter trga ali počakaj na več podatkov.",
+        "BS": "🔍 **Nijedna kombinacija proizvod–prodavnica nema dovoljnu historiju za pouzdanu prognozu.**\nUvjet: min. {n} historijskih akcija i {d} dana historije. Proširi filter tržišta ili sačekaj više podataka.",
+        "SR": "🔍 **Nijedna kombinacija proizvod–prodavnica nema dovoljnu istoriju za pouzdanu prognozu.**\nUslov: min. {n} istorijskih akcija i {d} dana istorije. Proširi filter tržišta ili sačekaj više podataka.",
+        "MK": "🔍 **Ниедна комбинација производ–продавница нема доволна историја за сигурна прогноза.**\nУслов: мин. {n} историски акции и {d} дена историја. Прошири го филтерот за пазар или почекај повеќе податоци.",
+        "ME": "🔍 **Nijedna kombinacija proizvod–prodavnica nema dovoljno istorije za pouzdanu prognozu.**\nUslov: min. {n} istorijskih akcija i {d} dana istorije. Proširi filter tržišta ili sačekaj više podataka.",
+    },
+    "kam.no_filter_match": {
+        "EN": "No forecasts match the active filters. Reset or widen the filters.",
+        "HR": "Nijedna prognoza ne odgovara aktivnim filterima. Poništi ili proširi filtere.",
+        "SL": "Nobena napoved ne ustreza aktivnim filtrom. Ponastavi ali razširi filtre.",
+        "BS": "Nijedna prognoza ne odgovara aktivnim filterima. Poništi ili proširi filtere.",
+        "SR": "Nijedna prognoza ne odgovara aktivnim filterima. Poništi ili proširi filtere.",
+        "MK": "Ниедна прогноза не одговара на активните филтри. Ресетирај ги или прошири ги филтрите.",
+        "ME": "Nijedna prognoza ne odgovara aktivnim filterima. Poništi ili proširi filtere.",
+    },
     # ── Signal labels ──
     "signal.high": {
         "EN": "🔴 High relevance", "HR": "🔴 Visoka relevantnost", "SL": "🔴 Visoka ustreznost",
