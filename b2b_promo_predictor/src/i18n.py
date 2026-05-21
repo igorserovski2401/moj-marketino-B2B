@@ -102,6 +102,50 @@ CATEGORY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "EN": "Other", "HR": "Ostalo", "SL": "Ostalo",
         "BS": "Ostalo", "SR": "Ostalo", "MK": "Друго", "ME": "Ostalo",
     },
+    "Beverages": {
+        "EN": "Beverages", "HR": "Piće", "SL": "Pijače", "BS": "Piće",
+        "SR": "Piće", "MK": "Пијалоци", "ME": "Piće",
+    },
+    "Drinks": {
+        "EN": "Beverages", "HR": "Piće", "SL": "Pijače", "BS": "Piće",
+        "SR": "Piće", "MK": "Пијалоци", "ME": "Piće",
+    },
+    "Health & Beauty": {
+        "EN": "Health & Beauty", "HR": "Zdravlje i ljepota", "SL": "Zdravje in lepota",
+        "BS": "Zdravlje i ljepota", "SR": "Zdravlje i lepota", "MK": "Здравје и убавина", "ME": "Zdravlje i ljepota",
+    },
+    "Appliances": {
+        "EN": "Appliances", "HR": "Aparati i uređaji", "SL": "Aparati in naprave",
+        "BS": "Aparati i uređaji", "SR": "Aparati i uređaji", "MK": "Апарати и уреди", "ME": "Aparati i uređaji",
+    },
+    "Snacks": {
+        "EN": "Snacks", "HR": "Grickalice", "SL": "Prigrizki",
+        "BS": "Grickalice", "SR": "Grickalice", "MK": "Грицки", "ME": "Grickalice",
+    },
+    "Dairy": {
+        "EN": "Dairy Products", "HR": "Mliječni proizvodi", "SL": "Mlečni izdelki",
+        "BS": "Mliječni proizvodi", "SR": "Mlečni proizvodi", "MK": "Млечни производи", "ME": "Mliječni proizvodi",
+    },
+    "Baby": {
+        "EN": "Baby & Child", "HR": "Bebe i djeca", "SL": "Dojenčki in otroci",
+        "BS": "Bebe i djeca", "SR": "Bebe i deca", "MK": "Бебиња и деца", "ME": "Bebe i djeca",
+    },
+    "Frozen": {
+        "EN": "Frozen Food", "HR": "Zamrznuta hrana", "SL": "Zamrznjena hrana",
+        "BS": "Zamrznuta hrana", "SR": "Zamrznuta hrana", "MK": "Замрзната храна", "ME": "Zamrznuta hrana",
+    },
+    "Cleaning": {
+        "EN": "Cleaning", "HR": "Čišćenje", "SL": "Čiščenje",
+        "BS": "Čišćenje", "SR": "Čišćenje", "MK": "Чистење", "ME": "Čišćenje",
+    },
+    "Personal Care": {
+        "EN": "Personal Care", "HR": "Osobna njega", "SL": "Osebna nega",
+        "BS": "Lična njega", "SR": "Lična njega", "MK": "Лична нега", "ME": "Lična njega",
+    },
+    "Meat": {
+        "EN": "Meat & Deli", "HR": "Mesni proizvodi", "SL": "Mesni izdelki",
+        "BS": "Mesni proizvodi", "SR": "Mesni proizvodi", "MK": "Месни производи", "ME": "Mesni proizvodi",
+    },
     "Храна": {
         "EN": "Food", "HR": "Hrana", "SL": "Hrana", "BS": "Hrana",
         "SR": "Hrana", "MK": "Храна", "ME": "Hrana",

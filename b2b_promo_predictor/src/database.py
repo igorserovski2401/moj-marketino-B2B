@@ -115,24 +115,16 @@ def load_products(
     date_to: str | None = None,
     limit: int = 500,
     approved_only: bool = False,
+    allow_mock: bool = True,
 ) -> pd.DataFrame:
-    """Lädt Produkte aus Supabase mit optionalen Filtern.
+    """Load products from Supabase with optional filters.
 
-    Args:
-        country_code: ISO-Ländercode, z.B. "HR".
-        store_name: Exakter Händlername.
-        category_l1: Oberste Kategorie.
-        date_from: Aktionsbeginn >= (YYYY-MM-DD).
-        date_to: Aktionsende <= (YYYY-MM-DD).
-        limit: Max. Anzahl Zeilen (server-seitig).
-        approved_only: Nur genehmigte Produkte.
-
-    Returns:
-        DataFrame mit normierten Spalten.
+    When allow_mock=False (production mode), returns empty DataFrame instead
+    of synthetic fallback data on empty or error results.
     """
     client = get_client()
     if client is None:
-        return _mock_products(limit)
+        return _mock_products(limit) if allow_mock else pd.DataFrame()
 
     try:
         q = _safe_query(client, "products", _PRODUCT_COLS)
@@ -151,18 +143,19 @@ def load_products(
 
         resp = q.order("created_at", desc=True).limit(limit).execute()
         if not resp.data:
-            return _mock_products(limit)
+            return _mock_products(limit) if allow_mock else pd.DataFrame()
         df = _normalize(pd.DataFrame(resp.data))
         df, _ = run_quality_pipeline(df)
         return df
     except Exception:
-        return _mock_products(limit)
+        return _mock_products(limit) if allow_mock else pd.DataFrame()
 
 
 def load_upcoming_promos(
     country_code: str | None = None,
     days_ahead: int = 14,
     limit: int = 200,
+    allow_mock: bool = True,
 ) -> pd.DataFrame:
     """Produkte deren Aktion in den nächsten `days_ahead` Tagen beginnt."""
     today = date.today().isoformat()
@@ -172,6 +165,7 @@ def load_upcoming_promos(
         date_from=today,
         date_to=future,
         limit=limit,
+        allow_mock=allow_mock,
     )
 
 
@@ -212,11 +206,12 @@ def load_promo_history_for_forecast(
 def load_active_promos(
     country_code: str | None = None,
     limit: int = 300,
+    allow_mock: bool = True,
 ) -> pd.DataFrame:
-    """Produkte die heute aktiv sind (valid_from <= heute <= valid_until)."""
+    """Products active today (valid_from <= today <= valid_until)."""
     client = get_client()
     if client is None:
-        return _mock_products(50)
+        return _mock_products(50) if allow_mock else pd.DataFrame()
 
     today = date.today().isoformat()
     try:
@@ -226,12 +221,12 @@ def load_active_promos(
             q = q.eq("country_code", country_code)
         resp = q.order("price", desc=False).limit(limit).execute()
         if not resp.data:
-            return _mock_products(50)
+            return _mock_products(50) if allow_mock else pd.DataFrame()
         df = _normalize(pd.DataFrame(resp.data))
         df, _ = run_quality_pipeline(df)
         return df
     except Exception:
-        return _mock_products(50)
+        return _mock_products(50) if allow_mock else pd.DataFrame()
 
 
 def load_price_history(
@@ -399,7 +394,7 @@ def get_distinct_categories(country_code: str | None = None) -> list[str]:
 # ── Normalisierung ────────────────────────────────────────────────────────────
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
-    """Normiert Spaltentypen und rechnet Preise auf EUR um."""
+    """Normalize column types, prices, and retailer names."""
     for col in ["valid_from", "valid_until"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -407,6 +402,12 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["price", "original_price", "amount"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Normalize store_name to canonical form (deduplicates BIPA/Bipa/bipa etc.)
+    if "store_name" in df.columns:
+        df["store_name"] = df["store_name"].apply(
+            lambda x: normalize_retailer_name(x) if pd.notna(x) else x
+        )
 
     # Preise auf EUR normieren (Währungsspalte bleibt für Anzeige erhalten)
     if "currency" in df.columns and "price" in df.columns:
