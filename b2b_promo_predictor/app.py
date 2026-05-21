@@ -1,7 +1,6 @@
 """moj-marketino – B2B Promo Intelligence Platform.
-
-Dashboard für Key Account Manager (KAM) von FMCG-Herstellern am Balkanmarkt.
-Datenquelle: Supabase MarketinoDATABASE (997k+ Produkte, 6 Länder).
+Commercial intelligence for Key Account Managers in FMCG – Balkan markets.
+Data source: Supabase MarketinoDATABASE (997k+ products, 6 countries).
 """
 
 from __future__ import annotations
@@ -69,15 +68,18 @@ if not APP_VERSION:
         APP_VERSION = check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(Path(__file__).parent.parent), stderr=DEVNULL,
-        ).decode().strip() or "fix-i18n-crash"
+        ).decode().strip() or "7tab-rebuild"
     except Exception:
-        APP_VERSION = "fix-i18n-crash"
+        APP_VERSION = "7tab-rebuild"
 
 CACHE_VERSION: str = APP_VERSION
 
 # ── Country/category helpers ──────────────────────────────────────────────────
 
 COUNTRY_KEYS: list[str] = ["HR", "SI", "BA", "RS", "MK", "ME"]
+
+MAX_CALENDAR_ROWS = 500
+MIN_TREEMAP_ROWS = 5
 
 
 def _country_label(code: str, lang: str) -> str:
@@ -90,10 +92,6 @@ def cat_local(name: str | None, lang: str = "EN") -> str:
     return translate_category(name, lang)
 
 
-MAX_CALENDAR_ROWS = 500
-MIN_TREEMAP_ROWS = 5
-
-
 def _apply_quality(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Run quality pipeline, return cleaned data + report dict."""
     if df.empty:
@@ -103,7 +101,7 @@ def _apply_quality(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return clean, report._asdict()
 
 
-# ── Central filter pipeline – SINGLE source of truth for ALL components ──────
+# ── Central filter pipeline ───────────────────────────────────────────────────
 
 SEARCHABLE_FIELDS: list[str] = [
     "brand", "brand_clean", "manufacturer", "manufacturer_clean",
@@ -113,7 +111,7 @@ SEARCHABLE_FIELDS: list[str] = [
 
 
 def normalize_search_text(value) -> str:
-    """Lowercase + Unicode NFKD-strip + whitespace-collapse for fuzzy match."""
+    """Lowercase + NFKD Unicode + whitespace-collapse for fuzzy match."""
     if value is None:
         return ""
     value = str(value).strip().lower()
@@ -145,11 +143,7 @@ def build_filtered_view(
     brand_query: str = "",
     limit: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
-    """Single source of truth — every visible widget MUST use this pipeline.
-
-    Returns (filtered_df, audit_trace) where audit_trace records row counts
-    after each filter step. The audit is what gets shown in the debug expander.
-    """
+    """Single source of truth — every visible widget MUST use this pipeline."""
     audit = {
         "raw_rows": 0, "after_quality": 0, "after_market": 0,
         "after_category": 0, "after_retailer": 0, "after_brand": 0,
@@ -190,7 +184,7 @@ def validate_forecast_selection(
     market: str | None,
     currency: str | None,
 ) -> str:
-    """Returns 'ok' or a missing_* status. Use as a gate before running Prophet."""
+    """Returns 'ok' or a missing_* status. Gate before running Prophet."""
     if not product:
         return "missing_product"
     if not retailer or retailer == "__all__":
@@ -203,7 +197,7 @@ def validate_forecast_selection(
 
 
 def compute_trust_level(mape: float, observations: int, history_days: int) -> str:
-    """Return trust level key ('belastbar' / 'eingeschr' / 'nicht_belastbar')."""
+    """Return trust level key: 'belastbar' / 'eingeschr' / 'nicht_belastbar'."""
     import math
     if observations < MIN_OBSERVATIONS or history_days < MIN_HISTORY_DAYS:
         return "nicht_belastbar"
@@ -216,39 +210,25 @@ def compute_trust_level(mape: float, observations: int, history_days: int) -> st
     return "nicht_belastbar"
 
 
-def build_clean_view_df(
-    raw_df: pd.DataFrame,
-    country: str | None = None,
-    category: str | None = None,
-    retailer: str | None = None,
-    brand_search: str = "",
-    limit: int | None = None,
-) -> pd.DataFrame:
-    """Einheitliche Filter-Pipeline für alle Tabs und KPIs.
-
-    Reihenfolge: quality → country → category → retailer → brand → limit.
-    Alle Tabs verwenden diese Funktion um Konsistenz sicherzustellen.
-    """
-    if raw_df.empty:
-        return raw_df
-    df, _ = _apply_quality(raw_df)
-
-    if country and "country_code" in df.columns:
-        df = df[df["country_code"] == country]
-    if category and "category_l1" in df.columns:
-        df = df[df["category_l1"] == category]
-    if retailer and "store_name" in df.columns:
-        df = df[df["store_name"] == retailer]
-    if brand_search:
-        search_cols = [c for c in ["brand", "manufacturer", "name", "master_product"] if c in df.columns]
-        if search_cols:
-            mask = pd.Series(False, index=df.index)
-            for col in search_cols:
-                mask |= df[col].fillna("").str.contains(brand_search, case=False, regex=False)
-            df = df[mask]
-    if limit is not None:
-        df = df.head(limit)
-    return df
+def _dq_badge(row: pd.Series) -> str:
+    """Return a DQ status badge string for a single product row."""
+    issues = []
+    brand = str(row.get("brand") or row.get("brand_clean") or "")
+    if not brand or brand.lower() in ("", "unbekannt", "unknown", "none"):
+        issues.append("no_brand")
+    orig = row.get("original_price_eur") or row.get("original_price")
+    if pd.isna(orig) or orig is None:
+        issues.append("no_regular")
+    disc = row.get("discount_pct")
+    if pd.isna(disc) or disc is None or float(disc) <= 0:
+        issues.append("no_discount")
+    cat = str(row.get("category_l1") or "")
+    if not cat or cat.lower() in ("", "other", "unbekannt"):
+        issues.append("cat_uncertain")
+    score = row.get("match_score")
+    if score is not None and not pd.isna(score) and float(score) < MIN_MATCH_SCORE:
+        issues.append("low_match")
+    return "complete" if not issues else issues[0]
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -297,6 +277,9 @@ st.markdown(
         border-left: 4px solid {PRIMARY}; padding-left: .6rem;
         margin-bottom: .4rem;
       }}
+      .alert-high  {{ background:#FEF2F2; border-left: 4px solid {ACCENT}; border-radius:6px; padding:.6rem 1rem; margin:.3rem 0; }}
+      .alert-med   {{ background:#FFFBEB; border-left: 4px solid {AMBER}; border-radius:6px; padding:.6rem 1rem; margin:.3rem 0; }}
+      .alert-low   {{ background:#F0FDF4; border-left: 4px solid {GREEN}; border-radius:6px; padding:.6rem 1rem; margin:.3rem 0; }}
       div[data-testid="stMetric"] label {{ font-size: .78rem !important; }}
     </style>
     """,
@@ -316,19 +299,17 @@ with st.sidebar:
           <span style='font-size:1.6rem;'>📊</span><br>
           <strong style='font-size:1.1rem; color:#111827;'>moj-marketino</strong><br>
           <span style='font-size:.78rem; color:#6B7280;'>B2B Promo Intelligence</span><br>
-          <span style='font-size:.7rem; color:#9CA3AF;'>v2.3 · Balkan Edition</span>
+          <span style='font-size:.7rem; color:#9CA3AF;'>v3.0 · Balkan Edition</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Market FIRST so we can derive default language
     _country_keys_extended = ["__all__"] + COUNTRY_KEYS
 
     if "sel_country" not in st.session_state:
         st.session_state["sel_country"] = "__all__"
 
-    # Language with default-by-market (only if not manually overridden)
     if "ui_lang_manual" not in st.session_state:
         st.session_state["ui_lang_manual"] = False
 
@@ -345,7 +326,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Build / Deploy proof block — always visible
     _mode_label = t("build.production", current_lang) if production_mode else t("build.demo", current_lang)
     _source_label = t("build.supabase", current_lang) if production_mode else t("build.mock", current_lang)
     _mode_color = "#059669" if production_mode else "#D97706"
@@ -385,7 +365,6 @@ with st.sidebar:
     ui_lang = SUPPORTED_LANGS[lang_idx]
     if st.session_state["ui_lang_manual"]:
         st.session_state["ui_lang"] = ui_lang
-    # Re-read effective language
     current_lang = st.session_state.get("ui_lang", ui_lang)
     ui_lang = current_lang
 
@@ -416,8 +395,7 @@ with st.sidebar:
         t("sidebar.category", ui_lang),
         range(len(sidebar_cats)),
         format_func=lambda i: (
-            f"{translate_category(sidebar_cats[i], ui_lang)}"
-            if i > 0 else sidebar_cats[0]
+            translate_category(sidebar_cats[i], ui_lang) if i > 0 else sidebar_cats[0]
         ),
     )
     sel_cat = None if sel_cat_idx == 0 else sidebar_cats[sel_cat_idx]
@@ -435,7 +413,7 @@ with st.sidebar:
             value=MIN_MATCH_SCORE,
             step=0.05,
         )
-        kw_vorschau = st.slider("Preview weeks", 1, 8, 4)
+        kw_vorschau = st.slider(t("sidebar.preview_weeks", ui_lang) if t("sidebar.preview_weeks", ui_lang) != "sidebar.preview_weeks" else "Preview weeks", 1, 8, 4)
 
     st.divider()
     st.caption(f"© 2026 moj-marketino · Build {APP_VERSION}")
@@ -444,7 +422,6 @@ with st.sidebar:
 
 market_label = t(f"country.{sel_country}", ui_lang) if sel_country else t("sidebar.all_markets", ui_lang)
 
-# Demo mode banner – prominent, impossible to miss
 if demo_mode:
     st.warning(
         "⚠️ **DEMO MODE** – This dashboard is running on sample data only. "
@@ -464,21 +441,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── KPI-Zeile ─────────────────────────────────────────────────────────────────
+# ── Global KPI row ─────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _cached_stats(country: str | None) -> dict:
+def _cached_stats(country: str | None, _v=CACHE_VERSION) -> dict:
     return get_overview_stats(country)
 
 stats = _cached_stats(sel_country)
 
 k1, k2, k3, k4, k5 = st.columns(5)
 _kpis = [
-    (k1, "Beobachtete Artikel",       f"{stats['total_products']:,}".replace(",", "."), "MarketinoDB"),
-    (k2, "Aktive Händler",            str(stats["total_retailers"]),                    "Balkan-Märkte"),
-    (k3, "Flugblätter / Kataloge",    str(stats["total_catalogs"]),                     "Prospekte"),
-    (k4, "Märkte",                    str(stats["total_countries"]),                    "HR · SI · BA · RS · MK · ME"),
-    (k5, "Aktive Promotionen (KW)",   str(stats["active_promos"]),                     "Laufende Aktionen"),
+    (k1, t("kpi.observed_products", ui_lang),   f"{stats['total_products']:,}".replace(",", "."), "MarketinoDB"),
+    (k2, t("kpi.active_retailers", ui_lang),    str(stats["total_retailers"]),                    "Balkan"),
+    (k3, t("kpi.catalogs", ui_lang),            str(stats["total_catalogs"]),                     ""),
+    (k4, t("kpi.markets", ui_lang),             str(stats["total_countries"]),                    "HR · SI · BA · RS · MK · ME"),
+    (k5, t("kpi.active_promos_week", ui_lang),  str(stats.get("active_promos", 0)),               ""),
 ]
 for col, label, val, sub in _kpis:
     col.markdown(
@@ -491,828 +468,637 @@ for col, label, val, sub in _kpis:
     )
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
+# ── Load shared data ──────────────────────────────────────────────────────────
+# Shared forecast history used by Cockpit, Alerts, and Experimental tab.
 
-tab1, tab2, tab3 = st.tabs([
-    t("tab.predictor", ui_lang),
-    t("tab.price", ui_lang),
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_forecast_history(country, cat, _v=CACHE_VERSION):
+    return load_promo_history_for_forecast(
+        country_code=country, category_l1=cat, days_back=365, limit=5000,
+    )
+
+with st.spinner(t("general.loading", ui_lang)):
+    _history_raw = _load_forecast_history(sel_country, sel_cat)
+    history_df, _hist_audit = build_filtered_view(
+        _history_raw,
+        country=sel_country,
+        category=sel_cat,
+        brand_query=brand_filter,
+    )
+    _forecasts_all = build_forecasts_from_promo_history(history_df, lang=ui_lang)
+    fc_df_all = forecasts_to_dataframe(_forecasts_all)
+
+# ── 7 Tabs ────────────────────────────────────────────────────────────────────
+
+_tab_labels = [
+    t("tab.cockpit", ui_lang),
+    t("tab.monitor", ui_lang),
+    t("tab.history", ui_lang),
+    t("tab.benchmark", ui_lang),
+    t("tab.alerts", ui_lang),
     t("tab.quality", ui_lang),
-])
+    t("tab.forecast", ui_lang),
+]
+tab_cockpit, tab_monitor, tab_history, tab_bench, tab_alerts, tab_quality, tab_exp = st.tabs(_tab_labels)
 
 # ╔══════════════════════════════════════════════════════════════════════════════
-# TAB 1 – Promotion Predictor
+# TAB 1 – KAM Cockpit
 # ╚══════════════════════════════════════════════════════════════════════════════
 
-with tab1:
-    days_ahead = kw_vorschau * 7
-
-    # ╭────────────────────────────────────────────────────────────────────────╮
-    # │  TEIL 1 · KAM-Forecast (regelbasiert, historiengestützt)              │
-    # ╰────────────────────────────────────────────────────────────────────────╯
+with tab_cockpit:
     st.markdown(
-        f'<div class="section-header">🎯 {t("kam.title", ui_lang)}</div>',
+        f'<div class="section-header">🎯 {t("cockpit.action_briefing", ui_lang)}</div>',
         unsafe_allow_html=True,
     )
-    st.caption(
-        t("kam.min_req", ui_lang,
-          n=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
-          d=MIN_HISTORY_DAYS)
-    )
+    st.caption(t("cockpit.subtitle", ui_lang))
 
-    # ── Filterleiste ─────────────────────────────────────────────────────────
-    with st.container():
-        fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 2])
-        with fc1:
-            product_query = st.text_input(
-                t("kam.product_search", ui_lang),
-                value="",
-                placeholder="Milka, Coca-Cola, Red Bull…",
-                key="kam_product_query",
-            )
-        with fc2:
-            @st.cache_data(ttl=600, show_spinner=False)
-            def _fc_stores(c):
-                return [t("kam.all_retailers", "EN")] + get_distinct_stores(c)
-            fc_stores = _fc_stores(sel_country)
-            fc_store_idx = st.selectbox(
-                t("kam.retailer", ui_lang), range(len(fc_stores)),
-                format_func=lambda i: fc_stores[i], key="kam_store",
-            )
-            fc_retailer = None if fc_store_idx == 0 else fc_stores[fc_store_idx]
-        with fc3:
-            min_probability = st.slider(
-                t("kam.min_probability", ui_lang),
-                0.0, 0.95, 0.50, 0.05, key="kam_min_prob",
-            )
-        with fc4:
-            pred_window = st.slider(
-                t("kam.prediction_window", ui_lang),
-                7, 90, 30, 7, key="kam_pred_window",
-            )
+    # ── KAM KPIs ─────────────────────────────────────────────────────────────
+    _n_overdue = 0
+    _n_near_cycle = 0
+    _avg_disc = float("nan")
+    if not fc_df_all.empty:
+        for _fc in _forecasts_all:
+            if _fc.days_since_last_promo and _fc.avg_cycle_days:
+                if _fc.days_since_last_promo > _fc.avg_cycle_days * 1.2:
+                    _n_overdue += 1
+                elif _fc.days_since_last_promo > _fc.avg_cycle_days * 0.8:
+                    _n_near_cycle += 1
+        _disc_vals = [f.typical_discount_pct_max for f in _forecasts_all if f.typical_discount_pct_max]
+        if _disc_vals:
+            _avg_disc = sum(_disc_vals) / len(_disc_vals)
 
-        with st.expander("⚙️ Advanced forecast filters"):
-            ac1, ac2, ac3, ac4 = st.columns(4)
-            with ac1:
-                _signal_options_raw = ["Alle", "Hoch relevant", "Beobachten", "Normal"]
-                sel_signal = st.selectbox(
-                    t("kam.signal", ui_lang),
-                    _signal_options_raw,
-                    key="kam_signal",
-                )
-            with ac2:
-                sel_trend = st.selectbox(
-                    t("kam.price_trend", ui_lang),
-                    ["Alle", "steigend", "fallend", "stabil", "unbekannt"],
-                    key="kam_trend",
-                )
-            with ac3:
-                only_future = st.checkbox(
-                    t("kam.only_future", ui_lang), value=True, key="kam_only_future",
-                )
-            with ac4:
-                only_sufficient = st.checkbox(
-                    t("kam.only_sufficient", ui_lang),
-                    value=True, key="kam_only_sufficient",
-                )
-
-    # ── Load history and apply central filter pipeline ──────────────────────
-    @st.cache_data(ttl=300, show_spinner=False)
-    def _load_forecast_history(country, cat, _v=CACHE_VERSION):
-        return load_promo_history_for_forecast(
-            country_code=country, category_l1=cat, days_back=365, limit=5000,
-        )
-
-    with st.spinner(t("general.loading", ui_lang)):
-        history_raw = _load_forecast_history(sel_country, sel_cat)
-        # Central filter — brand search applies HERE too, not just to upcoming.
-        history_df, _hist_audit = build_filtered_view(
-            history_raw,
-            country=sel_country,
-            category=sel_cat,
-            brand_query=brand_filter,
-        )
-        forecasts = build_forecasts_from_promo_history(history_df, lang=ui_lang)
-        fc_df_all = forecasts_to_dataframe(forecasts)
-
-    fc_df = apply_forecast_filters(
-        fc_df_all,
-        retailer=fc_retailer,
-        product_query=product_query,
-        min_probability=min_probability,
-        signal=sel_signal,
-        price_trend=sel_trend,
-        only_future=only_future,
-        prediction_window_days=pred_window,
-    )
-
-    # Optionaler Status-Filter für "ungenügende Historie"
-    if not only_sufficient:
-        # Bei deaktiviertem Filter: zeige zusätzlich Forecasts mit Status != ok
-        # (Datenquelle ist trotzdem auf forecasts beschränkt → kommt aus build_forecasts_from_promo_history,
-        #  also bereits ≥3 Historien-Promos. Andere insufficient_history-Fälle sind hier ausgeschlossen.)
-        pass
-
-    # ── KAM-KPI-Karten ───────────────────────────────────────────────────────
-    n_high = int((fc_df["signal"] == "Hoch relevant").sum()) if not fc_df.empty else 0
-    n_rising = int((fc_df["price_trend"] == "steigend").sum()) if not fc_df.empty else 0
-    n_overdue = 0
-    if not fc_df.empty:
-        n_overdue = int(
-            fc_df.apply(
-                lambda r: (
-                    r.get("avg_cycle_days") is not None
-                    and r.get("days_since_last_promo") is not None
-                    and r["days_since_last_promo"] > r["avg_cycle_days"] * 1.2
-                ),
-                axis=1,
-            ).sum()
-        )
-    n_excluded_no_hist = max(0, len(history_df) - sum(f.historical_count for f in forecasts)) if forecasts else 0
-    avg_disc = float("nan")
-    if not fc_df.empty and "typical_discount_pct_max" in fc_df.columns:
-        avg_disc = fc_df["typical_discount_pct_max"].dropna().mean()
-
-    kk1, kk2, kk3, kk4, kk5 = st.columns(5)
-    kk1.metric(t("kpi.high_signal", ui_lang), str(n_high))
-    kk2.metric(t("kpi.rising_price", ui_lang), str(n_rising))
-    kk3.metric(t("kpi.overdue", ui_lang), str(n_overdue))
-    kk4.metric(t("kpi.forecast_base", ui_lang), f"{len(fc_df_all)}")
-    kk5.metric(t("kpi.avg_discount", ui_lang), f"{avg_disc:.0f} %" if pd.notna(avg_disc) else "—")
+    ck1, ck2, ck3, ck4 = st.columns(4)
+    ck1.metric(t("cockpit.overdue", ui_lang),   str(_n_overdue),          delta=None)
+    ck2.metric(t("cockpit.near_cycle", ui_lang), str(_n_near_cycle),      delta=None)
+    ck3.metric(t("kpi.forecast_base", ui_lang),  str(len(fc_df_all)),     delta=None)
+    ck4.metric(t("kpi.avg_discount", ui_lang),
+               f"{_avg_disc:.0f} %" if pd.notna(_avg_disc) else "—",
+               delta=None)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── KAM-Tabelle ──────────────────────────────────────────────────────────
-    if fc_df.empty:
-        if fc_df_all.empty:
-            st.info(t("kam.no_history", ui_lang, n=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER, d=MIN_HISTORY_DAYS))
-        else:
-            st.info(t("kam.no_filter_match", ui_lang))
+    # ── Build action briefing table ───────────────────────────────────────────
+    if not _forecasts_all:
+        st.info(t("cockpit.no_briefings", ui_lang))
     else:
-        # Anzeigespalten zusammenstellen
-        def _fmt_period(row):
-            s = row.get("expected_start")
-            e = row.get("expected_end")
-            if s is None:
-                return "—"
-            s_str = s.strftime("%d.%m.%Y") if hasattr(s, "strftime") else str(s)
-            if e is None:
-                return s_str
-            e_str = e.strftime("%d.%m.%Y") if hasattr(e, "strftime") else str(e)
-            return f"{s_str} – {e_str}"
-
-        _trend_labels = {
-            "steigend": t("trend.rising", ui_lang),
-            "fallend":  t("trend.falling", ui_lang),
-            "stabil":   t("trend.stable", ui_lang),
-            "unbekannt": t("trend.unknown", ui_lang),
+        _PRIORITY_MAP = {
+            "Hoch":   (t("alert.sev_high", ui_lang),   "#FEF2F2"),
+            "Mittel": (t("alert.sev_medium", ui_lang),  "#FFFBEB"),
+            "Niedrig": (t("alert.sev_low", ui_lang),    "#F0FDF4"),
         }
 
-        def _fmt_trend(row):
-            raw = row.get("price_trend") or "unbekannt"
-            pct = row.get("price_trend_pct")
-            label = _trend_labels.get(raw, raw)
-            if raw == "unbekannt" or pct is None:
-                return label
-            arrow = "▲" if raw == "steigend" else ("▼" if raw == "fallend" else "→")
-            return f"{arrow} {label} ({pct:+.1f} %)"
-
-        _days_label = t("general.days", ui_lang)
-        _median_label = t("general.median", ui_lang)
-
-        def _fmt_last_promo(row):
-            d = row.get("days_since_last_promo")
-            if d is None:
-                return "—"
-            return t("general.days_ago", ui_lang, d=d)
-
-        def _fmt_cycle(row):
-            avg = row.get("avg_cycle_days")
-            med = row.get("median_cycle_days")
-            if avg is None and med is None:
-                return "—"
-            if med is not None:
-                return f"{med} {_days_label} ({_median_label})"
-            return f"{avg} {_days_label} (Ø)"
-
-        _cur_sym = "€" if market_currency == "EUR" else market_currency
-
-        def _signal_emoji(s: str) -> str:
-            _map = {
-                "Hoch relevant":   t("signal.high", ui_lang),
-                "Beobachten":      t("signal.watch", ui_lang),
-                "Normal":          t("signal.normal", ui_lang),
-                "Nicht belastbar": t("signal.unreliable", ui_lang),
-                "Ungültig":        t("signal.invalid", ui_lang),
-            }
-            return _map.get(s, s)
-
-        display = fc_df.copy()
-        display[t("col.period", ui_lang)]      = display.apply(_fmt_period, axis=1)
-        display[t("kam.price_trend", ui_lang)] = display.apply(_fmt_trend, axis=1)
-        display[t("col.last_promo", ui_lang)]  = display.apply(_fmt_last_promo, axis=1)
-        display[t("col.cycle", ui_lang)]       = display.apply(_fmt_cycle, axis=1)
-        display[t("kam.signal", ui_lang)]      = display["signal"].apply(_signal_emoji)
-        display[t("col.probability", ui_lang)] = (display["probability"] * 100).round(0)
-
-        _period_col   = t("col.period", ui_lang)
-        _trend_col    = t("kam.price_trend", ui_lang)
-        _last_col     = t("col.last_promo", ui_lang)
-        _cycle_col    = t("col.cycle", ui_lang)
-        _signal_col   = t("kam.signal", ui_lang)
-        _prob_col     = t("col.probability", ui_lang)
-        _exp_price_col  = f"{t('col.expected_price', ui_lang)} ({_cur_sym})"
-        _last_price_col = f"{t('col.last_price', ui_lang)} ({_cur_sym})"
-
-        kam_cols = [
-            "priority", "product", "brand", "retailer", "country", "category",
-            _period_col, _prob_col,
-            "expected_price", "last_promo_price", _trend_col,
-            _cycle_col, _last_col, "historical_count",
-            _signal_col, "justification",
-        ]
-        display = display[[c for c in kam_cols if c in display.columns]]
-        display = display.rename(columns={
-            "priority":        t("col.priority", ui_lang),
-            "product":         t("col.product", ui_lang),
-            "brand":           t("col.brand", ui_lang),
-            "retailer":        t("col.retailer", ui_lang),
-            "country":         t("col.market", ui_lang),
-            "category":        t("col.category", ui_lang),
-            "expected_price":  _exp_price_col,
-            "last_promo_price": _last_price_col,
-            "historical_count": t("col.history_count", ui_lang),
-            "justification":   t("col.justification", ui_lang),
-        })
-
-        _price_fmt = "%.2f €" if market_currency == "EUR" else f"%.2f {market_currency}"
-        col_cfg = {
-            _prob_col: st.column_config.ProgressColumn(
-                _prob_col, min_value=0, max_value=100, format="%.0f %%",
+        _rows = []
+        for _fc in sorted(
+            _forecasts_all,
+            key=lambda f: (
+                0 if (f.days_since_last_promo and f.avg_cycle_days
+                      and f.days_since_last_promo > f.avg_cycle_days * 1.2) else
+                1 if (f.days_since_last_promo and f.avg_cycle_days
+                      and f.days_since_last_promo > f.avg_cycle_days * 0.8) else 2,
+                -(f.probability or 0),
             ),
-            _exp_price_col: st.column_config.NumberColumn(
-                _exp_price_col, format=_price_fmt,
-            ),
-            _last_price_col: st.column_config.NumberColumn(
-                _last_price_col, format=_price_fmt,
-            ),
-        }
+        ):
+            _prio_label, _ = _PRIORITY_MAP.get(_fc.priority, (_fc.priority, "#FFFFFF"))
+            _cycle = (
+                f"{_fc.median_cycle_days} {t('general.days', ui_lang)}"
+                if _fc.median_cycle_days
+                else (f"{_fc.avg_cycle_days} {t('general.days', ui_lang)}" if _fc.avg_cycle_days else "—")
+            )
+            _since = (
+                t("general.days_ago", ui_lang, d=_fc.days_since_last_promo)
+                if _fc.days_since_last_promo is not None else "—"
+            )
+            _rec = (
+                t("cockpit.recommend_prepare", ui_lang)
+                if _fc.days_since_last_promo and _fc.avg_cycle_days
+                   and _fc.days_since_last_promo > _fc.avg_cycle_days * 1.2
+                else t("cockpit.recommend_monitor", ui_lang)
+            )
+            _rows.append({
+                t("cockpit.col_priority", ui_lang): _prio_label,
+                t("cockpit.col_product", ui_lang):  _fc.product[:40] if _fc.product else "—",
+                t("cockpit.col_brand", ui_lang):    _fc.brand or "—",
+                t("cockpit.col_retailer", ui_lang): _fc.retailer or "—",
+                t("cockpit.col_days_since", ui_lang): _since,
+                t("cockpit.col_cycle", ui_lang):    _cycle,
+                t("cockpit.col_price", ui_lang):    (
+                    format_price(_fc.last_promo_price, market_currency)
+                    if _fc.last_promo_price else "—"
+                ),
+                t("cockpit.col_trust", ui_lang):    f"{_fc.probability:.0%}",
+                t("cockpit.recommendation", ui_lang): _rec,
+            })
 
-        st.dataframe(
-            display,
-            column_config=col_cfg,
-            use_container_width=True, hide_index=True, height=440,
-        )
+        briefing_df = pd.DataFrame(_rows)
+        if not briefing_df.empty:
+            # Colour-code priority column
+            prio_col = t("cockpit.col_priority", ui_lang)
+            st.dataframe(
+                briefing_df,
+                use_container_width=True,
+                hide_index=True,
+                height=min(35 * len(briefing_df) + 45, 600),
+            )
 
-        st.caption(f"📊 {len(display)} · {t('col.priority', ui_lang)} → {t('col.probability', ui_lang)}")
+    # ── Product filter inside cockpit ─────────────────────────────────────────
+    with st.expander("🔍 " + t("sidebar.filter", ui_lang)):
+        _ck_q = st.text_input(t("filter.search_product", ui_lang), key="ck_product_q")
+        if _ck_q and not briefing_df.empty:
+            _prod_col = t("cockpit.col_product", ui_lang)
+            if _prod_col in briefing_df.columns:
+                briefing_df = briefing_df[
+                    briefing_df[_prod_col].str.contains(_ck_q, case=False, na=False)
+                ]
 
-        # ── Detail view ──────────────────────────────────────────────────────
-        st.markdown(
-            f'<div class="section-header">{t("section.detail", ui_lang)}</div>',
-            unsafe_allow_html=True,
-        )
-        fc_df["_label"] = (
-            fc_df["product"].fillna("?") + " · " +
-            fc_df["retailer"].fillna("?") + " (" +
-            fc_df["country"].fillna("") + ")"
-        )
-        sel_idx = st.selectbox(
-            t("detail.select_combo", ui_lang),
-            options=range(len(fc_df)),
-            format_func=lambda i: fc_df["_label"].iloc[i],
-            key="kam_detail_select",
-        )
-        sel_row = fc_df.iloc[sel_idx]
 
-        _det_cur_sym = "€" if market_currency == "EUR" else market_currency
+# ╔══════════════════════════════════════════════════════════════════════════════
+# TAB 2 – Promo Monitor
+# ╚══════════════════════════════════════════════════════════════════════════════
 
-        def _fmt_money(v):
-            return f"{v:.2f} {_det_cur_sym}" if v is not None and pd.notna(v) else "—"
-
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            st.markdown(f"**{t('detail.product', ui_lang)}:** {sel_row['product']}")
-            st.markdown(f"**{t('detail.brand', ui_lang)}:** {sel_row.get('brand') or '—'}")
-            st.markdown(f"**{t('detail.retailer', ui_lang)}:** {sel_row['retailer']}")
-            st.markdown(f"**{t('detail.market', ui_lang)}:** {sel_row.get('country') or '—'}")
-        with d2:
-            st.markdown(f"**{t('detail.price_module', ui_lang)}**")
-            st.markdown(f"{t('detail.expected', ui_lang)}: **{_fmt_money(sel_row.get('expected_price'))}**")
-            if pd.notna(sel_row.get("last_promo_price")):
-                st.markdown(f"{t('detail.last_promo_price', ui_lang)}: **{_fmt_money(sel_row['last_promo_price'])}**")
-            if pd.notna(sel_row.get("avg_promo_price_90d")):
-                st.markdown(f"{t('detail.avg_90d', ui_lang)}: {_fmt_money(sel_row['avg_promo_price_90d'])}")
-            if pd.notna(sel_row.get("avg_promo_price_180d")):
-                st.markdown(f"{t('detail.avg_180d', ui_lang)}: {_fmt_money(sel_row['avg_promo_price_180d'])}")
-            if pd.notna(sel_row.get("min_promo_price_12m")) and pd.notna(sel_row.get("max_promo_price_12m")):
-                st.markdown(
-                    f"{t('detail.minmax_12m', ui_lang)}: "
-                    f"{_fmt_money(sel_row['min_promo_price_12m'])} / "
-                    f"{_fmt_money(sel_row['max_promo_price_12m'])}"
-                )
-            if pd.notna(sel_row.get("price_change_vs_last_pct")):
-                arrow = "▲" if sel_row['price_change_vs_last_pct'] > 0 else "▼"
-                st.markdown(
-                    f"{t('detail.change_vs_last', ui_lang)}: {arrow} "
-                    f"{sel_row['price_change_vs_last_eur']:+.2f} {_det_cur_sym} "
-                    f"({sel_row['price_change_vs_last_pct']:+.1f} %)"
-                )
-        with d3:
-            st.markdown(f"**{t('detail.cycle_signal', ui_lang)}**")
-            if sel_row.get("median_cycle_days") is not None:
-                st.markdown(f"{t('detail.avg_cycle', ui_lang)}: {sel_row['median_cycle_days']} {t('general.days', ui_lang)} ({t('general.median', ui_lang)})")
-            if sel_row.get("days_since_last_promo") is not None:
-                st.markdown(f"{t('detail.last_promo', ui_lang)}: {t('general.days_ago', ui_lang, d=sel_row['days_since_last_promo'])}")
-            if sel_row.get("typical_duration_days") is not None:
-                st.markdown(f"{t('detail.typical_duration', ui_lang)}: {sel_row['typical_duration_days']} {t('general.days', ui_lang)}")
-            if sel_row.get("typical_discount_pct_min") is not None and sel_row.get("typical_discount_pct_max") is not None:
-                st.markdown(
-                    f"{t('detail.typical_discount', ui_lang)}: "
-                    f"{sel_row['typical_discount_pct_min']:.0f} – "
-                    f"{sel_row['typical_discount_pct_max']:.0f} %"
-                )
-            _signal_map = {
-                "Hoch relevant":   t("signal.high", ui_lang),
-                "Beobachten":      t("signal.watch", ui_lang),
-                "Normal":          t("signal.normal", ui_lang),
-                "Nicht belastbar": t("signal.unreliable", ui_lang),
-                "Ungültig":        t("signal.invalid", ui_lang),
-            }
-            _signal_disp = _signal_map.get(sel_row["signal"], sel_row["signal"])
-            st.markdown(f"**{t('detail.signal', ui_lang)}:** {_signal_disp}")
-            st.markdown(f"**{t('detail.probability', ui_lang)}:** {sel_row['probability']*100:.0f} %")
-
-        st.markdown(f"**{t('detail.justification', ui_lang)}:** " + (sel_row.get("justification") or "—"))
-
-        # Historical promos
-        hist_promos = sel_row.get("last_promos") or []
-        if hist_promos:
-            st.markdown(f"**{t('detail.history_5', ui_lang)}**")
-            hist_rows = []
-            for p in hist_promos:
-                start = p.get("start").strftime("%d.%m.%Y") if p.get("start") else "—"
-                end = p.get("end").strftime("%d.%m.%Y") if p.get("end") else "—"
-                price = _fmt_money(p.get("price"))
-                disc = f"-{p['discount_pct']:.0f} %" if p.get("discount_pct") is not None else "—"
-                hist_rows.append({
-                    "Start": start, "End": end,
-                    t("detail.last_promo_price", ui_lang): price,
-                    "Rabatt": disc,
-                })
-            st.dataframe(pd.DataFrame(hist_rows), use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # ╭────────────────────────────────────────────────────────────────────────╮
-    # │  TEIL 2 · Bevorstehende Aktionen (gefiltert + Data-Quality-Badges)    │
-    # ╰────────────────────────────────────────────────────────────────────────╯
+with tab_monitor:
     st.markdown(
-        f'<div class="section-header">{t("section.upcoming", ui_lang)}</div>',
+        f'<div class="section-header">📋 {t("monitor.title", ui_lang)}</div>',
         unsafe_allow_html=True,
     )
-    st.caption(t("upcoming.caption", ui_lang, w=kw_vorschau, market=market_label))
-
-    with st.expander(t("section.dq_filter", ui_lang), expanded=False):
-        bf1, bf2, bf3 = st.columns(3)
-        with bf1:
-            f_only_brand = st.checkbox(t("dq.brand_missing", ui_lang) + " ✗", value=False, key="up_only_brand")
-            f_only_discount = st.checkbox(t("dq.no_real_discount", ui_lang) + " ✗", value=False, key="up_only_disc")
-        with bf2:
-            f_only_orig = st.checkbox(t("dq.orig_price_missing", ui_lang) + " ✗", value=False, key="up_only_orig")
-            f_only_real_disc = st.checkbox("≥ 5 % " + t("upcoming.avg_discount", ui_lang), value=False, key="up_only_real")
-        with bf3:
-            f_no_other = st.checkbox(t("dq.category_uncertain", ui_lang) + " ✗", value=False, key="up_no_other")
+    st.caption(t("monitor.subtitle", ui_lang))
 
     @st.cache_data(ttl=180, show_spinner=False)
-    def _upcoming(country, days, cat, _v=CACHE_VERSION):
-        df = load_upcoming_promos(country_code=country, days_ahead=days, limit=400)
-        if cat and "category_l1" in df.columns:
-            df = df[df["category_l1"] == cat]
-        return df
+    def _load_upcoming(country, _v=CACHE_VERSION):
+        return load_upcoming_promos(country_code=country, days_ahead=21, limit=300)
 
     with st.spinner(t("general.loading", ui_lang)):
-        upcoming_raw = _upcoming(sel_country, days_ahead, sel_cat)
-        upcoming_df, _upcoming_audit = build_filtered_view(
-            upcoming_raw,
+        _upcoming_raw = _load_upcoming(sel_country)
+        _upcoming_df, _ = build_filtered_view(
+            _upcoming_raw,
             country=sel_country,
             category=sel_cat,
             brand_query=brand_filter,
         )
-        _uq = {"n_total": len(upcoming_raw), "n_excluded": len(upcoming_raw) - len(upcoming_df)}
 
-    # Daten-Qualitäts-Filter
-    if not upcoming_df.empty:
-        if f_only_brand and "brand" in upcoming_df.columns:
-            upcoming_df = upcoming_df[upcoming_df["brand"].fillna("").str.strip() != ""]
-        if f_only_discount and "discount_pct" in upcoming_df.columns:
-            upcoming_df = upcoming_df[upcoming_df["discount_pct"].fillna(0) > 0]
-        if f_only_orig and "original_price_eur" in upcoming_df.columns:
-            upcoming_df = upcoming_df[upcoming_df["original_price_eur"].notna()]
-        if f_only_real_disc and "discount_pct" in upcoming_df.columns:
-            upcoming_df = upcoming_df[upcoming_df["discount_pct"].fillna(0) >= 5]
-        if f_no_other and "category_de" in upcoming_df.columns:
-            upcoming_df = upcoming_df[~upcoming_df["category_de"].isin(["Sonstiges", "Other", "—", "", None])]
+    # ── Filter row ────────────────────────────────────────────────────────────
+    _mf1, _mf2, _mf3 = st.columns(3)
+    with _mf1:
+        _mon_real_disc = st.checkbox(t("monitor.filter_real_discount", ui_lang), value=False, key="mon_real_disc")
+    with _mf2:
+        _mon_with_brand = st.checkbox(t("monitor.filter_with_brand", ui_lang), value=False, key="mon_brand")
+    with _mf3:
+        _mon_reliable = st.checkbox(t("monitor.filter_reliable", ui_lang), value=False, key="mon_reliable")
 
-    if not upcoming_df.empty:
-        n_up = len(upcoming_df)
-        n_retailers = upcoming_df["store_name"].nunique() if "store_name" in upcoming_df.columns else 0
-        ua, ub, uc, ud = st.columns(4)
-        ua.metric(t("upcoming.found", ui_lang), str(n_up))
-        ub.metric(t("upcoming.retailers_involved", ui_lang), str(n_retailers))
-        if "discount_pct" in upcoming_df.columns:
-            avg_disc = upcoming_df["discount_pct"].dropna().mean()
-            uc.metric(t("upcoming.avg_discount", ui_lang), f"{avg_disc:.1f} %" if pd.notna(avg_disc) else "—")
-        if _uq["n_excluded"] > 0:
-            ud.metric(t("upcoming.faulty", ui_lang), str(_uq["n_excluded"]))
+    _mon_df = _upcoming_df.copy()
 
-        # Data-Quality-Badge per row (localised)
-        def _badge(row):
-            badges = []
-            if pd.isna(row.get("brand")) or str(row.get("brand")).strip() == "":
-                badges.append(t("dq.brand_missing", ui_lang))
-            if pd.isna(row.get("original_price_eur")):
-                badges.append(t("dq.orig_price_missing", ui_lang))
-            elif pd.isna(row.get("discount_pct")) or row.get("discount_pct", 0) < 5:
-                badges.append(t("dq.no_real_discount", ui_lang))
-            if row.get("category_de") in (None, "", "Sonstiges", "Other", "—"):
-                badges.append(t("dq.category_uncertain", ui_lang))
-            return ", ".join(badges) if badges else t("dq.complete", ui_lang)
+    if not _mon_df.empty:
+        # Apply DQ badges
+        _mon_df["__dq"] = _mon_df.apply(_dq_badge, axis=1)
 
-        upcoming_df = upcoming_df.copy()
-        upcoming_df["_quality"] = upcoming_df.apply(_badge, axis=1)
+        if _mon_real_disc:
+            _disc_col = "discount_pct"
+            if _disc_col in _mon_df.columns:
+                _mon_df = _mon_df[_mon_df[_disc_col].fillna(0) > 0]
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        _up_cols = [
-            "store_name", "name", "brand", "price_eur", "original_price_eur",
-            "discount_pct", "currency", "category_de", "country_code",
-            "valid_from", "valid_until", "discount_label", "_quality",
-        ]
-        up_show = upcoming_df[[c for c in _up_cols if c in upcoming_df.columns]].copy()
-        _cur_sym = "€" if market_currency == "EUR" else market_currency
-        _promo_col = f"{t('forecast.price_label', ui_lang)} ({_cur_sym})"
-        _orig_col = f"{t('detail.last_promo_price', ui_lang)} ({_cur_sym})"
-        _disc_col = f"% {t('upcoming.avg_discount', ui_lang)}"
-        up_show = up_show.rename(columns={
-            "store_name":         t("detail.retailer", ui_lang),
-            "name":               t("detail.product", ui_lang),
-            "brand":              t("detail.brand", ui_lang),
-            "price_eur":          _promo_col,
-            "original_price_eur": _orig_col,
-            "discount_pct":       _disc_col,
-            "currency":           t("forecast.currency", ui_lang),
-            "category_de":        t("detail.market", ui_lang) if False else t("col.category", ui_lang),
-            "country_code":       t("detail.market", ui_lang),
-            "valid_from":         "Start",
-            "valid_until":        "End",
-            "discount_label":     t("upcoming.avg_discount", ui_lang),
-            "_quality":           t("dq.complete", ui_lang).replace("✓ ", ""),
-        })
+        if _mon_with_brand:
+            _brand_col = "brand_clean" if "brand_clean" in _mon_df.columns else "brand"
+            if _brand_col in _mon_df.columns:
+                _mon_df = _mon_df[_mon_df[_brand_col].notna() & (_mon_df[_brand_col] != "")]
 
-        _price_fmt = "%.2f €" if market_currency == "EUR" else f"%.2f {market_currency}"
-        col_cfg = {}
-        if _promo_col in up_show.columns:
-            col_cfg[_promo_col] = st.column_config.NumberColumn(_promo_col, format=_price_fmt)
-        if _orig_col in up_show.columns:
-            col_cfg[_orig_col] = st.column_config.NumberColumn(_orig_col, format=_price_fmt)
-        if _disc_col in up_show.columns:
-            col_cfg[_disc_col] = st.column_config.ProgressColumn(
-                _disc_col, min_value=0, max_value=70, format="%.1f %%",
-            )
+        if _mon_reliable and "match_score" in _mon_df.columns:
+            _mon_df = _mon_df[_mon_df["match_score"].fillna(0) >= MIN_MATCH_SCORE]
 
-        st.dataframe(up_show, column_config=col_cfg, use_container_width=True, hide_index=True, height=380)
-
-        # ── Treemap with MIN_TREEMAP_ROWS guard ───────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        _tree_cat = "category_de" if "category_de" in upcoming_df.columns else "category_l1"
-        if "store_name" in upcoming_df.columns and _tree_cat in upcoming_df.columns:
-            cat_quality_bad = False
-            if _tree_cat in upcoming_df.columns:
-                bad_cats = upcoming_df[_tree_cat].isin(["Sonstiges", "Other", "—", "", None]).sum()
-                cat_quality_bad = bad_cats / max(len(upcoming_df), 1) > 0.5
-
-            if len(upcoming_df) < MIN_TREEMAP_ROWS:
-                st.info(t("charts.treemap_min_rows", ui_lang, n=MIN_TREEMAP_ROWS, got=len(upcoming_df)))
-            elif len(upcoming_df) > 300 or cat_quality_bad:
-                st.warning(t("charts.treemap_disabled", ui_lang))
-            else:
-                treemap_df = (
-                    upcoming_df.groupby(["store_name", _tree_cat])
-                    .size().reset_index(name="n")
-                )
-                if _tree_cat != "category_de":
-                    treemap_df["category_de"] = treemap_df[_tree_cat].apply(
-                        lambda x: cat_local(x, ui_lang)
-                    )
-                    _tree_cat = "category_de"
-                else:
-                    treemap_df["category_de"] = treemap_df["category_de"].apply(
-                        lambda x: cat_local(x, ui_lang)
-                    )
-                fig_tree = px.treemap(
-                    treemap_df,
-                    path=["store_name", "category_de"],
-                    values="n",
-                    title=t("charts.distribution_title", ui_lang, w=kw_vorschau),
-                    color="n",
-                    color_continuous_scale="Blues",
-                )
-                fig_tree.update_layout(margin=dict(t=50, b=10))
-                st.plotly_chart(fig_tree, use_container_width=True)
+    if _mon_df.empty:
+        st.info(t("monitor.no_data", ui_lang))
     else:
-        st.info(t("upcoming.none", ui_lang))
+        # ── DQ summary ───────────────────────────────────────────────────────
+        _dq_counts = _mon_df["__dq"].value_counts() if "__dq" in _mon_df.columns else pd.Series(dtype=int)
+        _n_complete = int(_dq_counts.get("complete", 0))
+        _n_total_mon = len(_mon_df)
+        _pct_complete = _n_complete / max(_n_total_mon, 1) * 100
 
-    st.divider()
+        _dm1, _dm2, _dm3 = st.columns(3)
+        _dm1.metric(t("dq.total_records", ui_lang), str(_n_total_mon))
+        _dm2.metric(t("dq.complete_pct", ui_lang), f"{_pct_complete:.0f} %")
+        _dm3.metric(t("dq.avg_match_score", ui_lang),
+                    f"{_mon_df['match_score'].mean():.2f}" if "match_score" in _mon_df.columns else "—")
 
-    # ╭────────────────────────────────────────────────────────────────────────╮
-    # │  TEIL 3 · LightGBM (experimentell, optional)                           │
-    # ╰────────────────────────────────────────────────────────────────────────╯
-    with st.expander(t("section.ml_expander", ui_lang)):
-        st.caption(t("ml.caption", ui_lang))
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        train_btn = st.button(t("ml.retrain", ui_lang), key="train_lgbm_btn")
-        trained_model = None
-        if train_btn:
-            if not db_connected:
-                st.warning(t("ml.no_db", ui_lang))
-            else:
-                with st.spinner(t("general.loading", ui_lang)):
-                    raw_train = load_products(country_code=sel_country, limit=2000)
-                    if len(raw_train) > 50:
-                        feat_df = to_feature_df(raw_train)
-                        trained_model = train_lgbm(feat_df)
-                        st.success(f"OK · {len(feat_df):,} samples")
-                    else:
-                        st.warning(t("ml.no_db", ui_lang))
+        # ── DQ badge mapping ─────────────────────────────────────────────────
+        _DQ_LABEL = {
+            "complete":    t("monitor.dq_complete", ui_lang),
+            "no_brand":    t("monitor.dq_no_brand", ui_lang),
+            "no_regular":  t("monitor.dq_no_regular", ui_lang),
+            "no_discount": t("monitor.dq_no_discount", ui_lang),
+            "cat_uncertain": t("monitor.dq_cat_uncertain", ui_lang),
+            "low_match":   t("monitor.dq_low_match", ui_lang),
+        }
+
+        # ── Display table ─────────────────────────────────────────────────────
+        _price_col = "price_eur" if "price_eur" in _mon_df.columns else "price"
+        _orig_col  = "original_price_eur" if "original_price_eur" in _mon_df.columns else "original_price"
+
+        _show_cols_src = [
+            ("name",            t("monitor.col_product", ui_lang)),
+            ("brand_clean",     t("monitor.col_brand", ui_lang)),
+            ("store_name",      t("monitor.col_retailer", ui_lang)),
+            ("country_code",    t("monitor.col_market", ui_lang)),
+            ("category_l1",     t("monitor.col_category", ui_lang)),
+            ("valid_from",      t("monitor.col_valid_from", ui_lang)),
+            ("valid_until",     t("monitor.col_valid_until", ui_lang)),
+            ("discount_pct",    t("monitor.col_discount", ui_lang)),
+            (_price_col,        t("monitor.col_promo_price", ui_lang)),
+            (_orig_col,         t("monitor.col_regular_price", ui_lang)),
+            ("currency",        t("monitor.col_currency", ui_lang)),
+            ("__dq",            t("monitor.col_dq", ui_lang)),
+        ]
+        _avail_src = [(s, d) for s, d in _show_cols_src if s in _mon_df.columns]
+        _mon_show = _mon_df[[s for s, _ in _avail_src]].copy()
+        _mon_show.columns = [d for _, d in _avail_src]
+
+        _dq_disp_col = t("monitor.col_dq", ui_lang)
+        if _dq_disp_col in _mon_show.columns:
+            _mon_show[_dq_disp_col] = _mon_show[_dq_disp_col].map(_DQ_LABEL).fillna("—")
+
+        if _pct_complete < 100:
+            _bad_pct = int(100 - _pct_complete)
+            if "match_score" in _mon_df.columns:
+                _low_match_pct = int((_mon_df["match_score"].fillna(0) < MIN_MATCH_SCORE).mean() * 100)
+                if _low_match_pct > 10:
+                    st.warning(t("dq.low_score_warning", ui_lang, pct=_low_match_pct))
+
+        _cfg_mon: dict = {}
+        _disc_disp_col = t("monitor.col_discount", ui_lang)
+        _price_disp_col = t("monitor.col_promo_price", ui_lang)
+        _orig_disp_col  = t("monitor.col_regular_price", ui_lang)
+        if _disc_disp_col in _mon_show.columns:
+            _cfg_mon[_disc_disp_col] = st.column_config.NumberColumn(_disc_disp_col, format="%.1f %%")
+        if _price_disp_col in _mon_show.columns:
+            _cfg_mon[_price_disp_col] = st.column_config.NumberColumn(_price_disp_col, format="%.2f")
+        if _orig_disp_col in _mon_show.columns:
+            _cfg_mon[_orig_disp_col] = st.column_config.NumberColumn(_orig_disp_col, format="%.2f")
+
+        st.dataframe(_mon_show, use_container_width=True, hide_index=True,
+                     column_config=_cfg_mon, height=400)
+
+        # ── CSV export ────────────────────────────────────────────────────────
+        _csv_bytes = _mon_show.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label=t("monitor.export", ui_lang),
+            data=_csv_bytes,
+            file_name=f"promo_monitor_{sel_country or 'all'}.csv",
+            mime="text/csv",
+        )
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
-# TAB 2 – Preisanalyse & Wettbewerb
+# TAB 3 – Product History
 # ╚══════════════════════════════════════════════════════════════════════════════
 
-with tab2:
+with tab_history:
     st.markdown(
-        f'<div class="section-header">🔮 {t("forecast.tab_title", ui_lang)}</div>',
+        f'<div class="section-header">📈 {t("history.title", ui_lang)}</div>',
         unsafe_allow_html=True,
     )
-    st.markdown(f"**{t('forecast.section_select', ui_lang)}**")
+    st.caption(t("history.select_prompt", ui_lang))
 
-    # ── REQUIRED selection: Product + Retailer + Market + Currency ───────────
+    # ── Product + Retailer selectors ──────────────────────────────────────────
     @st.cache_data(ttl=600, show_spinner=False)
-    def _p_stores(c, _v=CACHE_VERSION):
+    def _hist_stores(c, _v=CACHE_VERSION):
         return get_distinct_stores(c)
 
-    @st.cache_data(ttl=120, show_spinner=False)
-    def _hist(term, store, country, _v=CACHE_VERSION):
-        return load_price_history(product_name=term or None, retailer=store, country_code=country)
+    _hist_available_stores = _hist_stores(sel_country)
 
-    fc_col1, fc_col2 = st.columns([3, 2])
-    with fc_col1:
-        search_term = st.text_input(
-            t("forecast.product", ui_lang) + " *",
-            value=brand_filter or "",
-            placeholder="Wudy, Coca-Cola, Cedevita…",
-            key="fc_search_term",
+    _hc1, _hc2 = st.columns(2)
+    with _hc1:
+        _hist_product_q = st.text_input(
+            t("history.select_product", ui_lang),
+            placeholder="Milka, Coca-Cola, Podravka…",
+            key="hist_product_q",
         )
-    with fc_col2:
-        p_stores = _p_stores(sel_country)
-        sel_price_store_idx = st.selectbox(
-            t("forecast.retailer", ui_lang) + " *",
-            range(len(p_stores) + 1),
-            format_func=lambda i: "— select —" if i == 0 else p_stores[i - 1],
-            key="fc_retailer_pick",
+    with _hc2:
+        _hist_store_opts = ["—"] + _hist_available_stores
+        _hist_store_idx = st.selectbox(
+            t("history.select_retailer", ui_lang),
+            range(len(_hist_store_opts)),
+            format_func=lambda i: _hist_store_opts[i],
+            key="hist_store_pick",
         )
-        price_store_val = None if sel_price_store_idx == 0 else p_stores[sel_price_store_idx - 1]
+        _hist_retailer = None if _hist_store_idx == 0 else _hist_store_opts[_hist_store_idx]
 
-    fc_col3, fc_col4, fc_col5 = st.columns([2, 1, 1])
-    with fc_col3:
-        fc_market = sel_country
-        st.text_input(
-            t("forecast.market", ui_lang) + " *",
-            value=(t(f"country.{fc_market}", ui_lang) if fc_market else "— select market in sidebar —"),
-            disabled=True, key="fc_market_disp",
-        )
-    with fc_col4:
-        st.text_input(
-            t("forecast.currency", ui_lang),
-            value=market_currency,
-            disabled=True, key="fc_currency_disp",
-        )
-    with fc_col5:
-        forecast_periods = st.slider(
-            t("forecast.horizon", ui_lang), 7, 90, 30, key="prophet_periods",
-        )
-
-    selection_status = validate_forecast_selection(
-        product=search_term, retailer=price_store_val,
-        market=fc_market, currency=market_currency,
-    )
-
-    run_forecast = st.button(t("forecast.run", ui_lang), type="primary", key="run_fc_btn")
-
-    if selection_status != "ok":
-        st.warning(t("forecast.missing_selection", ui_lang))
-        st.stop()
-
-    # ── Load history strictly for the chosen product/retailer/market ─────────
-    with st.spinner(t("general.loading", ui_lang)):
-        hist_raw = _hist(search_term, price_store_val, fc_market)
-        hist_df, hist_audit = build_filtered_view(
-            hist_raw,
-            country=fc_market,
-            brand_query=search_term,
-        )
-
-    _hist_price_col = "price_eur" if not hist_df.empty and "price_eur" in hist_df.columns else "price"
-    _p_sym = "€" if market_currency == "EUR" else market_currency
-
-    # Plot historical prices
-    if not hist_df.empty and "recorded_at" in hist_df.columns and _hist_price_col in hist_df.columns:
-        st.markdown(
-            f'<div class="section-header">📈 {t("forecast.historical_price", ui_lang)} – {search_term}</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(f"{len(hist_df):,} · {price_store_val} · {fc_market} · {market_currency}")
-        fig_hist = px.area(
-            hist_df.sort_values("recorded_at"),
-            x="recorded_at", y=_hist_price_col,
-            markers=True,
-            color_discrete_sequence=[PRIMARY],
-            labels={
-                "recorded_at": t("forecast.axis_date", ui_lang),
-                _hist_price_col: t("forecast.axis_price", ui_lang, currency=market_currency),
-            },
-        )
-        fig_hist.update_layout(
-            hovermode="x unified", margin=dict(t=20, b=20),
-            plot_bgcolor="white", paper_bgcolor="white",
-            xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),
-            yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),
-        )
-        st.plotly_chart(fig_hist, use_container_width=True)
+    if not _hist_product_q and not _hist_retailer:
+        st.info(t("history.select_prompt", ui_lang))
     else:
-        st.info(t("forecast.too_few_points", ui_lang, n=len(hist_df)))
-
-    # ── Eligibility gate before Prophet ──────────────────────────────────────
-    if not run_forecast:
-        st.info("👆 " + t("forecast.run", ui_lang))
-        st.stop()
-
-    obs_count = int(len(hist_df))
-    history_days = 0
-    if obs_count > 0 and "recorded_at" in hist_df.columns:
-        _ts = pd.to_datetime(hist_df["recorded_at"], errors="coerce").dropna()
-        if len(_ts) > 1:
-            history_days = int((_ts.max() - _ts.min()).days)
-
-    eligible = (obs_count >= MIN_OBSERVATIONS and history_days >= MIN_HISTORY_DAYS)
-
-    if production_mode and not eligible:
-        st.error(
-            t("forecast.too_few_points", ui_lang, n=obs_count)
-            + f"  ·  history: {history_days} days (need ≥ {MIN_HISTORY_DAYS})"
-        )
-        st.stop()
-
-    # ── Build the prophet forecast ───────────────────────────────────────────
-    with st.spinner(t("general.loading", ui_lang)):
-        prophet_fig, forecast_df = forecast_price_trend(
-            df=hist_df,
-            product_id=search_term,
-            periods=forecast_periods,
-            allow_mock=not production_mode,
-            currency=market_currency,
-            lang=ui_lang,
-            title_prefix=f"{search_term} · {price_store_val}",
+        # Filter history using the global pipeline
+        _hist_view, _ = build_filtered_view(
+            _history_raw,
+            country=sel_country,
+            category=sel_cat,
+            retailer=_hist_retailer,
+            brand_query=_hist_product_q,
         )
 
-    st.plotly_chart(prophet_fig, use_container_width=True)
+        if _hist_view.empty:
+            st.info(t("history.no_data", ui_lang))
+        else:
+            # ── Stats row ─────────────────────────────────────────────────────
+            _n_hist = len(_hist_view)
+            _price_col_h = "price_eur" if "price_eur" in _hist_view.columns else "price"
+            _disc_col_h  = "discount_pct"
 
-    if forecast_df.empty:
-        st.warning(t("forecast.prophet_failed", ui_lang))
-        st.stop()
+            _hs1, _hs2, _hs3, _hs4 = st.columns(4)
+            _hs1.metric(t("history.stat_total", ui_lang), str(_n_hist))
 
-    # ── KPI math: clean, no negative drops ───────────────────────────────────
-    fc_p = forecast_df.reset_index(drop=True)
-    _hist_sorted = hist_df.sort_values("recorded_at") if "recorded_at" in hist_df.columns else hist_df
-    _last_series = _hist_sorted[_hist_price_col].dropna() if _hist_price_col in _hist_sorted.columns else pd.Series(dtype=float)
-    last_hist_price = float(_last_series.iloc[-1]) if len(_last_series) > 0 else float(fc_p["yhat"].iloc[0])
+            _avg_d = _hist_view[_disc_col_h].dropna().mean() if _disc_col_h in _hist_view.columns else float("nan")
+            _hs2.metric(t("history.stat_median_price", ui_lang),
+                        format_price(_hist_view[_price_col_h].dropna().median(), market_currency)
+                        if _price_col_h in _hist_view.columns else "—")
+            _hs3.metric("Avg. discount", f"{_avg_d:.0f} %" if pd.notna(_avg_d) else "—")
 
-    end_price = float(fc_p["yhat"].iloc[-1])
-    min_price = float(fc_p["yhat"].min())
-    max_price = float(fc_p["yhat"].max())
-    min_pos = int(fc_p["yhat"].idxmin())
-    max_pos = int(fc_p["yhat"].idxmax())
+            # Days since last promo
+            _date_col_h = "valid_from"
+            if _date_col_h in _hist_view.columns:
+                _dates_h = pd.to_datetime(_hist_view[_date_col_h], errors="coerce").dropna()
+                if len(_dates_h) > 0:
+                    _days_since_h = (pd.Timestamp.now() - _dates_h.max()).days
+                    _hs4.metric(t("history.stat_days_since", ui_lang), str(_days_since_h))
 
-    if last_hist_price > 0:
-        price_change_pct = (end_price - last_hist_price) / last_hist_price * 100
-        max_drop_pct     = max(0.0, (last_hist_price - min_price) / last_hist_price * 100)
-        max_rise_pct     = max(0.0, (max_price - last_hist_price) / last_hist_price * 100)
-    else:
-        price_change_pct = max_drop_pct = max_rise_pct = 0.0
+            st.markdown("<br>", unsafe_allow_html=True)
 
-    try:
-        min_date = fc_p["ds"].iloc[min_pos].strftime("%d.%m.%Y")
-        max_date = fc_p["ds"].iloc[max_pos].strftime("%d.%m.%Y")
-    except (IndexError, AttributeError):
-        min_date = "—"
-        max_date = "—"
+            # ── Timeline chart ────────────────────────────────────────────────
+            if _date_col_h in _hist_view.columns and _price_col_h in _hist_view.columns:
+                _chart_df = _hist_view.dropna(subset=[_date_col_h, _price_col_h]).copy()
+                _chart_df[_date_col_h] = pd.to_datetime(_chart_df[_date_col_h], errors="coerce")
+                _chart_df = _chart_df.sort_values(_date_col_h)
 
-    drop_delta = (
-        t("forecast.no_drop", ui_lang) if max_drop_pct == 0
-        else f"−{max_drop_pct:.1f} % vs. today"
-    )
-    rise_delta = (
-        t("forecast.no_rise", ui_lang) if max_rise_pct == 0
-        else f"+{max_rise_pct:.1f} % vs. today"
-    )
+                if len(_chart_df) > 0:
+                    _color_col = "store_name" if "store_name" in _chart_df.columns else None
+                    _fig_h = px.scatter(
+                        _chart_df,
+                        x=_date_col_h,
+                        y=_price_col_h,
+                        color=_color_col,
+                        size=_disc_col_h if _disc_col_h in _chart_df.columns else None,
+                        hover_name="name" if "name" in _chart_df.columns else None,
+                        hover_data={_disc_col_h: ":.1f"} if _disc_col_h in _chart_df.columns else {},
+                        title=t("history.chart_title", ui_lang)
+                              if t("history.chart_title", ui_lang) != "history.chart_title"
+                              else "Promo Price Timeline",
+                        labels={
+                            _date_col_h: t("history.col_period", ui_lang),
+                            _price_col_h: f"{t('history.col_price', ui_lang)} ({market_currency})",
+                        },
+                        color_discrete_sequence=px.colors.qualitative.Set2,
+                    )
+                    _fig_h.update_layout(
+                        hovermode="x unified",
+                        margin=dict(t=30, b=20),
+                        plot_bgcolor="white",
+                        paper_bgcolor="white",
+                        xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),
+                        yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),
+                    )
+                    st.plotly_chart(_fig_h, use_container_width=True)
 
-    fi1, fi2, fi3, fi4 = st.columns(4)
-    _kpi_cards = [
-        (fi1, t("forecast.kpi.future_price", ui_lang, days=forecast_periods),
-         f"{end_price:.2f} {_p_sym}",
-         f"{'▼' if price_change_pct < 0 else '▲'} {abs(price_change_pct):.1f} % vs. today",
-         "kpi-card"),
-        (fi2, t("forecast.kpi.lowest", ui_lang),
-         f"{min_price:.2f} {_p_sym}", f"{min_date}", "kpi-card-green"),
-        (fi3, t("forecast.kpi.highest", ui_lang),
-         f"{max_price:.2f} {_p_sym}", f"{max_date}", "kpi-card-red"),
-        (fi4, t("forecast.kpi.max_drop", ui_lang),
-         f"{max_drop_pct:.1f} %", drop_delta, "kpi-card-amber"),
-    ]
-    for col, label, val, delta, css in _kpi_cards:
-        col.markdown(
-            f"""<div class="kpi-card {css}">
-              <div class="kpi-label">{label}</div>
-              <div class="kpi-value">{val}</div>
-              <div class="kpi-delta">{delta}</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Forecast audit block ────────────────────────────────────────────────
-    work_for_mape = pd.DataFrame({
-        "ds": pd.to_datetime(hist_df["recorded_at"], errors="coerce"),
-        "y": pd.to_numeric(hist_df[_hist_price_col], errors="coerce"),
-    }).dropna().sort_values("ds")
-    mape, mae, bias = compute_backtest_mape(work_for_mape)
-    trust_key = compute_trust_level(mape, obs_count, history_days)
-
-    trust_label = {
-        "belastbar":       "✅ " + t("trust.belastbar", ui_lang),
-        "eingeschr":       "⚠️ " + t("trust.eingeschr", ui_lang),
-        "nicht_belastbar": "❌ " + t("trust.nicht_belastbar", ui_lang),
-    }[trust_key]
-
-    with st.expander(t("forecast.audit_title", ui_lang), expanded=True):
-        a1, a2, a3 = st.columns(3)
-        with a1:
-            st.markdown(f"**{t('forecast.audit.status', ui_lang)}:** "
-                        + ("ok" if eligible else t("status.insufficient_history", ui_lang)))
-            st.markdown(f"**{t('forecast.audit.trust', ui_lang)}:** {trust_label}")
-            st.markdown(f"**{t('forecast.audit.source', ui_lang)}:** "
-                        + (t('build.supabase', ui_lang) if production_mode else t('build.mock', ui_lang)))
-        with a2:
-            st.markdown(f"**{t('forecast.audit.observations', ui_lang)}:** {obs_count}")
-            st.markdown(f"**{t('forecast.audit.history_days', ui_lang)}:** {history_days}")
-            st.markdown(f"**{t('forecast.audit.outliers', ui_lang)}:** —")
-        with a3:
-            mape_disp = f"{mape*100:.1f} %" if not pd.isna(mape) else "—"
-            st.markdown(f"**{t('forecast.audit.mape', ui_lang)}:** {mape_disp}")
-            st.markdown(f"**{t('forecast.currency', ui_lang)}:** {market_currency}")
-            st.markdown(f"**{t('forecast.retailer', ui_lang)}:** {price_store_val}")
-
-    # ── Historical evidence table ────────────────────────────────────────────
-    with st.expander("📋 " + t("detail.history_5", ui_lang).replace(":", "")):
-        ev = hist_df.copy()
-        if "recorded_at" in ev.columns:
-            ev["recorded_at"] = pd.to_datetime(ev["recorded_at"], errors="coerce").dt.strftime("%d.%m.%Y")
-        ev = ev[[c for c in ["recorded_at", "product_name", "retailer", _hist_price_col]
-                 if c in ev.columns]].rename(columns={
-            "recorded_at": "Date",
-            "product_name": t("detail.product", ui_lang),
-            "retailer": t("detail.retailer", ui_lang),
-            _hist_price_col: f"{t('forecast.price_label', ui_lang)} ({_p_sym})",
-        })
-        st.dataframe(ev.head(50), use_container_width=True, hide_index=True)
+            # ── Detail table ──────────────────────────────────────────────────
+            _hist_show_cols = [
+                (_date_col_h,   t("history.col_period", ui_lang)),
+                ("store_name",  t("monitor.col_retailer", ui_lang)),
+                ("name",        t("monitor.col_product", ui_lang)),
+                ("brand_clean", t("monitor.col_brand", ui_lang)),
+                (_price_col_h,  t("history.col_price", ui_lang)),
+                ("original_price_eur", t("monitor.col_regular_price", ui_lang)),
+                (_disc_col_h,   t("history.col_discount", ui_lang)),
+            ]
+            _hist_avail = [(s, d) for s, d in _hist_show_cols if s in _hist_view.columns]
+            _hist_table = _hist_view[[s for s, _ in _hist_avail]].sort_values(_date_col_h, ascending=False).head(200)
+            _hist_table.columns = [d for _, d in _hist_avail]
+            st.dataframe(_hist_table, use_container_width=True, hide_index=True, height=300)
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
-# TAB 3 – Datenqualität & Pipeline
+# TAB 4 – Competitive Benchmark
 # ╚══════════════════════════════════════════════════════════════════════════════
 
-with tab3:
-    st.markdown('<div class="section-header">🗄️ Datenbank-Übersicht</div>', unsafe_allow_html=True)
+with tab_bench:
+    st.markdown(
+        f'<div class="section-header">⚔️ {t("bench.title", ui_lang)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(t("bench.subtitle", ui_lang))
 
+    _bench_df = history_df.copy()
+
+    if _bench_df.empty:
+        st.info(t("bench.no_data", ui_lang))
+    else:
+        # ── Category selector ─────────────────────────────────────────────────
+        _bench_cats = ["—"]
+        if "category_l1" in _bench_df.columns:
+            _bench_cats += sorted(_bench_df["category_l1"].dropna().unique().tolist())
+        _bench_cat_idx = st.selectbox(
+            t("bench.select_category", ui_lang),
+            range(len(_bench_cats)),
+            format_func=lambda i: cat_local(_bench_cats[i], ui_lang) if i > 0 else "—",
+            key="bench_cat_pick",
+        )
+        _sel_bench_cat = None if _bench_cat_idx == 0 else _bench_cats[_bench_cat_idx]
+
+        if _sel_bench_cat and "category_l1" in _bench_df.columns:
+            _bench_df = _bench_df[_bench_df["category_l1"] == _sel_bench_cat]
+
+        _brand_col_b = "brand_clean" if "brand_clean" in _bench_df.columns else "brand"
+        _store_col_b = "store_name"
+
+        _has_brand = _brand_col_b in _bench_df.columns and not _bench_df[_brand_col_b].isna().all()
+        _has_store = _store_col_b in _bench_df.columns
+
+        if not _has_brand or not _has_store:
+            st.info(t("bench.no_data", ui_lang))
+        else:
+            _bench_agg_cols = {
+                t("bench.col_promo_count", ui_lang): ("name", "count"),
+            }
+            _disc_col_b = "discount_pct"
+            _price_col_b = "price_eur" if "price_eur" in _bench_df.columns else "price"
+
+            _gb_keys = [_brand_col_b, _store_col_b]
+            if "country_code" in _bench_df.columns:
+                _gb_keys.append("country_code")
+
+            _agg_dict: dict = {"name": "count"}
+            if _disc_col_b in _bench_df.columns:
+                _agg_dict[_disc_col_b] = "mean"
+            if _price_col_b in _bench_df.columns:
+                _agg_dict[_price_col_b] = "median"
+
+            _bench_grp = (
+                _bench_df.groupby(_gb_keys, dropna=True)
+                .agg(_agg_dict)
+                .reset_index()
+            )
+            _bench_grp.columns = (
+                [_brand_col_b, _store_col_b]
+                + (["country_code"] if "country_code" in _gb_keys else [])
+                + [t("bench.col_promo_count", ui_lang)]
+                + ([t("bench.col_avg_discount", ui_lang)] if _disc_col_b in _agg_dict else [])
+                + ([t("bench.col_median_price", ui_lang)] if _price_col_b in _agg_dict else [])
+            )
+            _bench_grp = _bench_grp.rename(columns={
+                _brand_col_b: t("bench.col_brand", ui_lang),
+                _store_col_b: t("bench.col_retailer", ui_lang),
+            })
+
+            if len(_bench_grp) < 2:
+                st.info(t("bench.no_data", ui_lang))
+            else:
+                _brand_col_label  = t("bench.col_brand", ui_lang)
+                _retail_col_label = t("bench.col_retailer", ui_lang)
+                _count_col_label  = t("bench.col_promo_count", ui_lang)
+
+                # ── Heatmap ───────────────────────────────────────────────────
+                _hm_brands = _bench_grp[_brand_col_label].dropna().unique()
+                _hm_stores = _bench_grp[_retail_col_label].dropna().unique()
+
+                if len(_hm_brands) >= 2 and len(_hm_stores) >= 2:
+                    _pivot = _bench_grp.pivot_table(
+                        index=_brand_col_label,
+                        columns=_retail_col_label,
+                        values=_count_col_label,
+                        aggfunc="sum",
+                        fill_value=0,
+                    )
+                    _fig_hm = px.imshow(
+                        _pivot,
+                        color_continuous_scale="Blues",
+                        aspect="auto",
+                        title=t("bench.heatmap_title", ui_lang)
+                              if t("bench.heatmap_title", ui_lang) != "bench.heatmap_title"
+                              else "Promo Frequency",
+                        labels={"color": _count_col_label},
+                    )
+                    _fig_hm.update_layout(margin=dict(t=40, b=20))
+                    st.plotly_chart(_fig_hm, use_container_width=True)
+
+                # ── Summary table ─────────────────────────────────────────────
+                st.dataframe(
+                    _bench_grp.sort_values(_count_col_label, ascending=False),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=350,
+                )
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════
+# TAB 5 – Alerts
+# ╚══════════════════════════════════════════════════════════════════════════════
+
+with tab_alerts:
+    st.markdown(
+        f'<div class="section-header">🔔 {t("alert.title", ui_lang)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(t("alert.subtitle", ui_lang))
+
+    # ── Compute rule-based alerts from shared forecast data ───────────────────
+    _alert_rows = []
+
+    for _fc in _forecasts_all:
+        _a_product  = _fc.product or "—"
+        _a_brand    = _fc.brand or "—"
+        _a_retailer = _fc.retailer or "—"
+        _a_market   = _fc.country or "—"
+
+        if _fc.days_since_last_promo is not None and _fc.avg_cycle_days is not None:
+            _ratio = _fc.days_since_last_promo / max(_fc.avg_cycle_days, 1)
+
+            if _ratio > 1.2:
+                _days_over = _fc.days_since_last_promo - _fc.avg_cycle_days
+                _alert_rows.append({
+                    t("alert.col_severity", ui_lang): t("alert.sev_high", ui_lang),
+                    t("alert.col_type", ui_lang):     t("alert.type_overdue", ui_lang),
+                    t("alert.col_product", ui_lang):  _a_product[:40],
+                    t("alert.col_brand", ui_lang):    _a_brand,
+                    t("alert.col_retailer", ui_lang): _a_retailer,
+                    t("alert.col_market", ui_lang):   _a_market,
+                    t("alert.col_reason", ui_lang):   f"{_fc.days_since_last_promo}d / {_fc.avg_cycle_days}d avg",
+                    "_sort": 0,
+                })
+            elif _ratio > 0.85:
+                _alert_rows.append({
+                    t("alert.col_severity", ui_lang): t("alert.sev_medium", ui_lang),
+                    t("alert.col_type", ui_lang):     t("alert.type_near_cycle", ui_lang),
+                    t("alert.col_product", ui_lang):  _a_product[:40],
+                    t("alert.col_brand", ui_lang):    _a_brand,
+                    t("alert.col_retailer", ui_lang): _a_retailer,
+                    t("alert.col_market", ui_lang):   _a_market,
+                    t("alert.col_reason", ui_lang):   f"{_fc.days_since_last_promo}d / {_fc.avg_cycle_days}d avg",
+                    "_sort": 1,
+                })
+
+        # Price below historical minimum
+        if (_fc.last_promo_price and _fc.min_promo_price_12m
+                and _fc.last_promo_price < _fc.min_promo_price_12m * 0.9):
+            _alert_rows.append({
+                t("alert.col_severity", ui_lang): t("alert.sev_high", ui_lang),
+                t("alert.col_type", ui_lang):     t("alert.type_price_low", ui_lang),
+                t("alert.col_product", ui_lang):  _a_product[:40],
+                t("alert.col_brand", ui_lang):    _a_brand,
+                t("alert.col_retailer", ui_lang): _a_retailer,
+                t("alert.col_market", ui_lang):   _a_market,
+                t("alert.col_reason", ui_lang):   (
+                    f"{format_price(_fc.last_promo_price, market_currency)} < "
+                    f"{format_price(_fc.min_promo_price_12m, market_currency)} min"
+                ),
+                "_sort": 0,
+            })
+
+    if not _alert_rows:
+        st.success(t("alert.no_alerts", ui_lang))
+    else:
+        _alert_df = pd.DataFrame(_alert_rows).sort_values("_sort").drop(columns=["_sort"])
+
+        # ── Alert KPIs ────────────────────────────────────────────────────────
+        _sev_col = t("alert.col_severity", ui_lang)
+        _n_high_a  = int((_alert_df[_sev_col] == t("alert.sev_high", ui_lang)).sum()) if _sev_col in _alert_df.columns else 0
+        _n_med_a   = int((_alert_df[_sev_col] == t("alert.sev_medium", ui_lang)).sum()) if _sev_col in _alert_df.columns else 0
+        _n_low_a   = int((_alert_df[_sev_col] == t("alert.sev_low", ui_lang)).sum()) if _sev_col in _alert_df.columns else 0
+
+        _al1, _al2, _al3 = st.columns(3)
+        _al1.metric(t("alert.sev_high", ui_lang),   str(_n_high_a))
+        _al2.metric(t("alert.sev_medium", ui_lang), str(_n_med_a))
+        _al3.metric(t("alert.sev_low", ui_lang),    str(_n_low_a))
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if _n_high_a > 0:
+            st.warning(f"⚠️ {_n_high_a} {t('alert.type_overdue', ui_lang)} or price alerts — review recommended.")
+
+        st.dataframe(
+            _alert_df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(35 * len(_alert_df) + 45, 500),
+        )
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════
+# TAB 6 – Data Quality & Audit
+# ╚══════════════════════════════════════════════════════════════════════════════
+
+with tab_quality:
+    st.markdown(
+        f'<div class="section-header">🛡️ {t("db.title", ui_lang)}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Database status + markets ─────────────────────────────────────────────
     db_c1, db_c2 = st.columns([1, 2])
     with db_c1:
-        status_color = "#059669" if db_connected else "#D97706"
-        status_text  = "Verbunden" if db_connected else "Demo-Modus"
+        _dbs_color = "#059669" if db_connected else "#D97706"
+        _dbs_text  = t("build.production", ui_lang) if db_connected else t("build.demo", ui_lang)
         st.markdown(
             f"""
             <div class="kpi-card">
-              <div class="kpi-label">Datenbankstatus</div>
-              <div class="kpi-value" style="font-size:1.2rem; color:{status_color};">● {status_text}</div>
-              <div class="kpi-delta">MarketinoDATABASE · Supabase EU-Central-2</div>
+              <div class="kpi-label">{t('db.status', ui_lang)}</div>
+              <div class="kpi-value" style="font-size:1.2rem; color:{_dbs_color};">● {_dbs_text}</div>
+              <div class="kpi-delta">{t('db.source', ui_lang)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1321,9 +1107,9 @@ with tab3:
         st.markdown(
             f"""
             <div class="kpi-card">
-              <div class="kpi-label">Abgedeckte Märkte</div>
+              <div class="kpi-label">{t('db.covered_markets', ui_lang)}</div>
               <div class="kpi-value" style="font-size:1.1rem;">HR · SI · BA · RS · MK · ME</div>
-              <div class="kpi-delta">Kroatien · Slowenien · Bosnien · Serbien · Nordmazedonien · Montenegro</div>
+              <div class="kpi-delta">{" · ".join(t(f"country.{k}", ui_lang) for k in COUNTRY_KEYS)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1331,14 +1117,14 @@ with tab3:
 
     with db_c2:
         @st.cache_data(ttl=300, show_spinner=False)
-        def _retailer_dist(c): return get_retailer_distribution(c)
+        def _retailer_dist(c, _v=CACHE_VERSION): return get_retailer_distribution(c)
         dist_df = _retailer_dist(sel_country)
 
         if not dist_df.empty:
             top10 = dist_df.head(10)
             fig_pie = px.pie(
                 top10, names="store_name", values="cnt",
-                title="Top-10 Händler (Produktanzahl)",
+                title=t("db.top_retailers", ui_lang),
                 color_discrete_sequence=px.colors.qualitative.Set3,
                 hole=0.45,
             )
@@ -1350,97 +1136,108 @@ with tab3:
 
     st.divider()
 
-    # ── Produktdaten & Filter ─────────────────────────────────────────────────
-    st.markdown('<div class="section-header">📋 Produktdaten</div>', unsafe_allow_html=True)
+    # ── Product data & filter ─────────────────────────────────────────────────
+    st.markdown(f'<div class="section-header">📋 {t("db.product_data", ui_lang)}</div>', unsafe_allow_html=True)
 
-    qc1, qc2, qc3, qc4 = st.columns([2, 2, 2, 1])
+    qc1, qc2, qc3 = st.columns([2, 2, 1])
     with qc1:
         @st.cache_data(ttl=600, show_spinner=False)
-        def _stores_q(c): return ["Alle Händler"] + get_distinct_stores(c)
+        def _stores_q(c, _v=CACHE_VERSION): return [t("db.all_retailers", ui_lang)] + get_distinct_stores(c)
         q_stores = _stores_q(sel_country)
-        q_store_idx = st.selectbox("Händler", range(len(q_stores)), format_func=lambda i: q_stores[i], key="q_store")
+        q_store_idx = st.selectbox(
+            t("db.retailer_filter", ui_lang),
+            range(len(q_stores)),
+            format_func=lambda i: q_stores[i],
+            key="q_store",
+        )
         q_store = None if q_store_idx == 0 else q_stores[q_store_idx]
     with qc2:
-        q_n = st.select_slider("Datensätze", [50, 100, 250, 500], value=100)
+        q_n = st.select_slider(t("db.sample_size", ui_lang), [50, 100, 250, 500], value=100)
     with qc3:
         st.markdown("<br>", unsafe_allow_html=True)
-        q_load = st.button("🔄 Laden", type="primary", use_container_width=True, key="q_load")
+        q_load = st.button(t("db.load_btn", ui_lang), type="primary", use_container_width=True, key="q_load")
 
     @st.cache_data(ttl=120, show_spinner=False)
-    def _q_load(country, store, cat, n):
+    def _q_load(country, store, cat, n, _v=CACHE_VERSION):
         return load_products(country_code=country, store_name=store, category_l1=cat, limit=n)
 
-    with st.spinner("Lade & bereinige Produktdaten…"):
+    with st.spinner(t("general.loading", ui_lang)):
         q_raw = _q_load(sel_country, q_store, sel_cat, q_n)
         q_df, q_report = _apply_quality(q_raw)
 
-    # ── Quality Report ────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">🛡️ Datenqualitäts-Report (letzter Datenabruf)</div>', unsafe_allow_html=True)
+    # ── DQ Report ─────────────────────────────────────────────────────────────
+    st.markdown(f'<div class="section-header">🛡️ {t("db.dq_report", ui_lang)}</div>', unsafe_allow_html=True)
     rq1, rq2, rq3, rq4, rq5 = st.columns(5)
-    rq1.metric("Datensätze gesamt",           str(q_report["n_total"]))
-    rq2.metric("✅ Marken korrigiert",         str(q_report["n_brand_fixed"]),
-               help="Markenname wurde per Produktname-Keyword überschrieben")
-    rq3.metric("✅ Kategorien normiert",       str(q_report["n_cat_fixed"]),
-               help="Kategorie wurde per Rule-based Engine neu gesetzt")
-    rq4.metric("🔄 Preise getauscht",          str(q_report["n_price_swapped"]),
-               help="Promo > Regulär → Werte wurden getauscht (Extraktionsfehler)")
-    rq5.metric("🚫 Fehlerhafte Datensätze",    str(q_report["n_excluded"]),
-               delta=f"-{q_report['n_excluded']} ausgeschlossen" if q_report["n_excluded"] > 0 else None,
-               delta_color="inverse",
-               help="Preis-Anomalie: nach Tausch immer noch logisch falsch → aus Anzeige entfernt")
+    rq1.metric(t("db.records_total", ui_lang),     str(q_report["n_total"]))
+    rq2.metric(t("db.brands_fixed", ui_lang),      str(q_report["n_brand_fixed"]))
+    rq3.metric(t("db.categories_fixed", ui_lang),  str(q_report["n_cat_fixed"]))
+    rq4.metric(t("db.prices_valid", ui_lang),
+               str(q_report["n_total"] - q_report.get("n_price_swapped", 0) - q_report.get("n_excluded", 0)))
+    rq5.metric(t("db.prices_invalid", ui_lang),
+               str(q_report.get("n_excluded", 0)),
+               delta=f"-{q_report.get('n_excluded', 0)}" if q_report.get("n_excluded", 0) > 0 else None,
+               delta_color="inverse")
 
-    st.caption(
-        f"**Datenqualitätsrate: "
-        f"{(q_report['n_clean'] / max(q_report['n_total'], 1) * 100):.1f} %** "
-        f"({q_report['n_clean']} von {q_report['n_total']} Datensätzen bestehen Qualitätscheck)"
-    )
+    _dq_rate = q_report["n_clean"] / max(q_report["n_total"], 1) * 100
+    st.caption(f"**DQ rate: {_dq_rate:.1f} %** ({q_report['n_clean']} / {q_report['n_total']})")
     st.markdown("<br>", unsafe_allow_html=True)
 
     if not q_df.empty:
-        q_show = q_df[[c for c in [
-            "store_name", "name", "brand", "price_eur", "original_price_eur",
-            "discount_pct", "currency", "category_de", "country_code",
-            "valid_from", "valid_until", "discount_label",
-        ] if c in q_df.columns]].copy()
-        if "category_de" not in q_show.columns and "category_l1" in q_df.columns:
-            q_show["category_de"] = q_df["category_l1"].apply(cat_local)
-        q_show = q_show.rename(columns={
-            "store_name": "Händler", "name": "Produkt", "brand": "Marke (bereinigt)",
-            "price_eur": "Preis (€)", "original_price_eur": "Orig.-Preis (€)",
-            "discount_pct": "Rabatt %", "currency": "Währung",
-            "category_de": "Kategorie DE", "country_code": "Markt",
-            "valid_from": "Von", "valid_until": "Bis", "discount_label": "Rabatt-Label",
-        })
-        q_cfg: dict = {}
-        if "Preis (€)" in q_show.columns:
-            q_cfg["Preis (€)"] = st.column_config.NumberColumn("Preis (€)", format="%.2f €")
-        if "Orig.-Preis (€)" in q_show.columns:
-            q_cfg["Orig.-Preis (€)"] = st.column_config.NumberColumn("Orig.-Preis (€)", format="%.2f €")
-        if "Rabatt %" in q_show.columns:
-            q_cfg["Rabatt %"] = st.column_config.NumberColumn("Rabatt %", format="%.1f %%")
+        _price_col_q = "price_eur" if "price_eur" in q_df.columns else "price"
+        _orig_col_q  = "original_price_eur" if "original_price_eur" in q_df.columns else "original_price"
+        q_show_cols = [c for c in [
+            "store_name", "name", "brand_clean", _price_col_q, _orig_col_q,
+            "discount_pct", "currency", "category_l1", "country_code",
+            "valid_from", "valid_until",
+        ] if c in q_df.columns]
+        q_show = q_df[q_show_cols].copy()
+        if "category_l1" in q_show.columns:
+            q_show["category_l1"] = q_show["category_l1"].apply(lambda x: cat_local(x, ui_lang))
 
-        st.dataframe(q_show, column_config=q_cfg, use_container_width=True, hide_index=True, height=350)
+        _col_rename = {
+            "store_name": t("db.col_retailer", ui_lang) if t("db.col_retailer", ui_lang) != "db.col_retailer" else t("monitor.col_retailer", ui_lang),
+            "name":       t("monitor.col_product", ui_lang),
+            "brand_clean": t("db.col_brand", ui_lang) if t("db.col_brand", ui_lang) != "db.col_brand" else t("monitor.col_brand", ui_lang),
+            _price_col_q: t("monitor.col_promo_price", ui_lang),
+            _orig_col_q:  t("monitor.col_regular_price", ui_lang),
+            "discount_pct": t("monitor.col_discount", ui_lang),
+            "currency":   t("monitor.col_currency", ui_lang),
+            "category_l1": t("db.col_category", ui_lang) if t("db.col_category", ui_lang) != "db.col_category" else t("monitor.col_category", ui_lang),
+            "country_code": t("monitor.col_market", ui_lang),
+            "valid_from": t("monitor.col_valid_from", ui_lang),
+            "valid_until": t("monitor.col_valid_until", ui_lang),
+        }
+        q_show = q_show.rename(columns={k: v for k, v in _col_rename.items() if k in q_show.columns})
+
+        _qcfg: dict = {}
+        _p_col_disp = t("monitor.col_promo_price", ui_lang)
+        _o_col_disp = t("monitor.col_regular_price", ui_lang)
+        _d_col_disp = t("monitor.col_discount", ui_lang)
+        if _p_col_disp in q_show.columns:
+            _qcfg[_p_col_disp] = st.column_config.NumberColumn(_p_col_disp, format="%.2f")
+        if _o_col_disp in q_show.columns:
+            _qcfg[_o_col_disp] = st.column_config.NumberColumn(_o_col_disp, format="%.2f")
+        if _d_col_disp in q_show.columns:
+            _qcfg[_d_col_disp] = st.column_config.NumberColumn(_d_col_disp, format="%.1f %%")
+
+        st.dataframe(q_show, column_config=_qcfg, use_container_width=True, hide_index=True, height=350)
 
     st.divider()
 
-    # ── Kategorie-Verteilung ──────────────────────────────────────────────────
-    st.markdown('<div class="section-header">📊 Kategorie-Verteilung</div>', unsafe_allow_html=True)
+    # ── Category distribution ─────────────────────────────────────────────────
+    st.markdown(f'<div class="section-header">📊 {t("db.category_dist", ui_lang)}</div>', unsafe_allow_html=True)
 
     @st.cache_data(ttl=300, show_spinner=False)
-    def _cat_dist(c): return get_category_distribution(c)
+    def _cat_dist(c, _v=CACHE_VERSION): return get_category_distribution(c)
     cat_df = _cat_dist(sel_country)
 
     if not cat_df.empty:
-        cat_df["__cat"] = cat_df["category_l1"].apply(lambda x: cat_local(x, ui_lang))
-        cat_df["label"] = cat_df.apply(
-            lambda r: f"{r['__cat']} ({r['category_l1']})" if r["__cat"] != r["category_l1"] else r["category_l1"],
-            axis=1,
-        )
+        cat_df["_label"] = cat_df["category_l1"].apply(lambda x: cat_local(x, ui_lang))
         fig_cat = px.bar(
             cat_df.head(15),
-            x="cnt", y="label", orientation="h",
+            x="cnt", y="_label", orientation="h",
             color="cnt", color_continuous_scale="Blues",
-            labels={"cnt": "Anzahl Produkte", "label": "Kategorie"},
+            labels={"cnt": t("db.col_count", ui_lang) if t("db.col_count", ui_lang) != "db.col_count" else "Count", "_label": ""},
         )
         fig_cat.update_layout(
             coloraxis_showscale=False,
@@ -1454,21 +1251,18 @@ with tab3:
     st.divider()
 
     # ── Entity Matching ───────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">🔗 Entity-Matching – Produktnormierung</div>', unsafe_allow_html=True)
-    st.caption(
-        "KI-Sprachmodell (Sentence-Transformer) ordnet rohe Händler-Produktbezeichnungen "
-        f"einer normierten Master-Produktliste zu. Mindest-Score: {match_threshold:.0%}"
-    )
+    st.markdown(f'<div class="section-header">🔗 {t("db.entity_matching", ui_lang)}</div>', unsafe_allow_html=True)
+    st.caption(t("db.matching_subtitle", ui_lang) + f" · min score: {match_threshold:.0%}")
 
     MASTER_LIST = [
-        "Milka Schokolade 300g",
-        "Coca-Cola 1,5L PET",
-        "Ritter Sport Voll-Nuss 100g",
-        "Haribo Goldbären 200g",
-        "Nutella Nuss-Nougat-Creme 450g",
-        "Bio Vollmilch 3,5% 1L",
-        "Ariel Waschmittel 20 WL",
-        "Pampers Baby-Dry Gr.3 44 Stk",
+        "Milka Chocolate 300g",
+        "Coca-Cola 1.5L PET",
+        "Ritter Sport Milk Chocolate 100g",
+        "Haribo Gummibears 200g",
+        "Nutella Hazelnut Spread 450g",
+        "Organic Whole Milk 3.5% 1L",
+        "Ariel Laundry Detergent 20 WL",
+        "Pampers Baby-Dry Size 3 44pcs",
         "Red Bull Energy Drink 250ml",
         "Pringles Original 185g",
     ]
@@ -1481,42 +1275,39 @@ with tab3:
         results = matcher.batch_match(match_sample["name"].tolist(), MASTER_LIST, raw_categories=raw_cats)
 
     _show_debug = st.checkbox(
-        "🔍 Nicht-zugeordnete Produkte anzeigen (Debug)",
+        "🔍 " + (t("monitor.filter_reliable", ui_lang) + " — debug mode"),
         value=False,
-        help="Zeigt auch Produkte mit Score < Schwellenwert oder Kategorie-Konflikt",
+        key="em_debug",
     )
 
     match_df = match_sample[[c for c in ["store_name", "name", "price", "country_code"] if c in match_sample.columns]].copy()
-    match_df["master_produkt"] = [r.master_product for r in results]
+    match_df["master_product"] = [r.master_product for r in results]
     match_df["score"]          = [round(r.score, 4) for r in results]
-    match_df["methode"]        = [r.match_method for r in results]
+    match_df["method"]         = [r.match_method for r in results]
     match_df["status"]         = [r.match_status for r in results]
     match_df["OK"]             = ["✅" if r.is_confident else "⚠️" for r in results]
 
-    # Dashboard-Guard: zeige standardmäßig nur konfidente Matches
     if not _show_debug:
         match_df = match_df[match_df["status"].isin(["keyword_exact", "embedding_high_confidence"])]
 
     if match_df.empty:
-        st.info(
-            "Keine zugeordneten Produkte im Sample. "
-            "Aktiviere 'Nicht-zugeordnete Produkte anzeigen' für Details."
-        )
+        st.info("No matched products in sample. Enable debug mode for details.")
     else:
+        _col_map_em = {
+            "store_name":     t("monitor.col_retailer", ui_lang),
+            "name":           t("monitor.col_product", ui_lang),
+            "price":          t("monitor.col_promo_price", ui_lang),
+            "country_code":   t("monitor.col_market", ui_lang),
+            "master_product": "→ Master Product",
+            "method":         "Method",
+            "status":         "Status",
+            "OK":             "OK",
+        }
         match_cfg = {
             "score": st.column_config.ProgressColumn("Score", min_value=0, max_value=1, format="%.2f"),
         }
         st.dataframe(
-            match_df.rename(columns={
-                "store_name": "Händler",
-                "name": "Roh-Bezeichnung",
-                "price": "Preis",
-                "country_code": "Markt",
-                "master_produkt": "→ Master-Produkt",
-                "methode": "Methode",
-                "status": "Status",
-                "OK": "OK",
-            }),
+            match_df.rename(columns={k: v for k, v in _col_map_em.items() if k in match_df.columns}),
             column_config=match_cfg,
             use_container_width=True, hide_index=True,
         )
@@ -1524,85 +1315,456 @@ with tab3:
     conf_rate = sum(1 for r in results if r.is_confident) / max(len(results), 1) * 100
     unmatched_count = sum(1 for r in results if not r.is_confident)
     m1, m2, m3 = st.columns(3)
-    m1.metric("Match-Rate (Sample)", f"{conf_rate:.1f} %")
-    m2.metric("Konfidenz-Schwelle", f"{match_threshold:.0%}")
-    m3.metric("Nicht zugeordnet", str(unmatched_count), help="Score < Schwellenwert oder Kategorie-Konflikt")
+    m1.metric(t("dq.avg_match_score", ui_lang), f"{conf_rate:.1f} %")
+    m2.metric("Min. score", f"{match_threshold:.0%}")
+    m3.metric("Unmatched", str(unmatched_count))
 
     st.divider()
 
-    # ── Aktionskalender ───────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">📆 Aktionskalender</div>', unsafe_allow_html=True)
+    # ── Promo Calendar ────────────────────────────────────────────────────────
+    st.markdown(f'<div class="section-header">📆 {t("db.calendar", ui_lang)}</div>', unsafe_allow_html=True)
 
     @st.cache_data(ttl=180, show_spinner=False)
-    def _cal_data(country, store):
+    def _cal_data(country, store, _v=CACHE_VERSION):
         return load_products(country_code=country, store_name=store, limit=500)
 
     cal_df = _cal_data(sel_country, q_store)
 
     if cal_df.empty:
-        st.info("Keine Kalenderdaten verfügbar.")
+        st.info(t("db.no_calendar", ui_lang))
     elif "valid_from" not in cal_df.columns or "valid_until" not in cal_df.columns:
-        st.info("Aktionskalender benötigt Datums-Spalten (valid_from / valid_until).")
+        st.info(t("db.no_promo_dates", ui_lang))
     else:
         cal_clean = cal_df.dropna(subset=["valid_from", "valid_until"])
         if cal_clean.empty:
-            st.info("Keine Aktionen mit vollständigen Datumsinformationen.")
+            st.info(t("db.no_promo_dates", ui_lang))
         elif not q_store and sel_country is None:
-            st.info(
-                "Bitte wähle einen **Händler** oder einen **Markt** um den Kalender anzuzeigen. "
-                "Ohne Filter würde der Kalender zu viele Zeilen enthalten."
-            )
+            st.info("Select a retailer or market to view the calendar.")
         else:
             n_cal = len(cal_clean)
             if n_cal > MAX_CALENDAR_ROWS:
-                st.warning(
-                    f"Kalender enthält {n_cal:,} Einträge – zeige nur die ersten {MAX_CALENDAR_ROWS}. "
-                    "Verwende den Händler-Filter für eine präzisere Ansicht."
-                )
+                st.warning(f"Calendar has {n_cal:,} entries — showing first {MAX_CALENDAR_ROWS}.")
                 cal_clean = cal_clean.sort_values("valid_from").head(MAX_CALENDAR_ROWS).copy()
             else:
                 cal_clean = cal_clean.sort_values("valid_from").copy()
 
             if "category_l1" in cal_clean.columns:
-                cal_clean["Kategorie"] = cal_clean["category_l1"].apply(lambda x: cat_local(x, ui_lang))
+                cal_clean["_cat_label"] = cal_clean["category_l1"].apply(lambda x: cat_local(x, ui_lang))
             if "store_name" in cal_clean.columns:
                 fig_gantt = px.timeline(
                     cal_clean,
                     x_start="valid_from",
                     x_end="valid_until",
                     y="store_name",
-                    color="Kategorie" if "Kategorie" in cal_clean.columns else "store_name",
+                    color="_cat_label" if "_cat_label" in cal_clean.columns else "store_name",
                     hover_name="name" if "name" in cal_clean.columns else None,
-                    labels={"store_name": "Händler"},
+                    labels={"store_name": t("monitor.col_retailer", ui_lang)},
                 )
                 fig_gantt.update_layout(margin=dict(t=20, b=10))
                 st.plotly_chart(fig_gantt, use_container_width=True)
-            else:
-                st.info(t("upcoming.none", ui_lang))
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
-#  Global Audit / Debug expander (footer)
+# TAB 7 – Experimental Forecast
 # ╚══════════════════════════════════════════════════════════════════════════════
 
-with st.expander("🔬 " + t("section.audit", ui_lang)):
-    st.markdown(f"""
-| Field | Value |
-|---|---|
-| `app_version`           | `{APP_VERSION}` |
-| `cache_version`         | `{CACHE_VERSION}` |
-| `app_mode`              | `{'production' if production_mode else 'demo'}` |
-| `data_source`           | `{'supabase' if production_mode else 'mock'}` |
-| `language`              | `{ui_lang}` |
-| `market`                | `{sel_country or '__all__'}` |
-| `market_currency`       | `{market_currency}` |
-| `brand_query`           | `{brand_filter or '(empty)'}` |
-| `category`              | `{sel_cat or '(all)'}` |
-| `raw_rows (history)`    | `{_hist_audit.get('raw_rows', 0) if '_hist_audit' in dir() else 'n/a'}` |
-| `after_market`          | `{_hist_audit.get('after_market', 0) if '_hist_audit' in dir() else 'n/a'}` |
-| `after_category`        | `{_hist_audit.get('after_category', 0) if '_hist_audit' in dir() else 'n/a'}` |
-| `after_brand`           | `{_hist_audit.get('after_brand', 0) if '_hist_audit' in dir() else 'n/a'}` |
-| `forecast_rows`         | `{len(fc_df_all) if 'fc_df_all' in dir() else 'n/a'}` |
-| `upcoming_raw_rows`     | `{_upcoming_audit.get('raw_rows', 0) if '_upcoming_audit' in dir() else 'n/a'}` |
-| `upcoming_final_rows`   | `{_upcoming_audit.get('final', 0) if '_upcoming_audit' in dir() else 'n/a'}` |
-""")
+with tab_exp:
+    st.warning(t("exp.disclaimer", ui_lang), icon="⚠️")
+
+    _exp_tabs = st.tabs([t("exp.tab_kam", ui_lang), t("exp.tab_price", ui_lang)])
+
+    # ── Sub-tab A: Rule-Based KAM Forecast ───────────────────────────────────
+    with _exp_tabs[0]:
+        st.markdown(
+            f'<div class="section-header">🎯 {t("kam.title", ui_lang)}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            t("kam.min_req", ui_lang,
+              n=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
+              d=MIN_HISTORY_DAYS)
+        )
+
+        # ── Forecast filters ──────────────────────────────────────────────────
+        with st.container():
+            fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 2])
+            with fc1:
+                product_query = st.text_input(
+                    t("kam.product_search", ui_lang),
+                    value="",
+                    placeholder="Milka, Coca-Cola, Red Bull…",
+                    key="exp_product_query",
+                )
+            with fc2:
+                @st.cache_data(ttl=600, show_spinner=False)
+                def _fc_stores(c, _v=CACHE_VERSION):
+                    return [t("kam.all_retailers", "EN")] + get_distinct_stores(c)
+                fc_stores = _fc_stores(sel_country)
+                fc_store_idx = st.selectbox(
+                    t("kam.retailer", ui_lang), range(len(fc_stores)),
+                    format_func=lambda i: fc_stores[i], key="exp_store",
+                )
+                fc_retailer = None if fc_store_idx == 0 else fc_stores[fc_store_idx]
+            with fc3:
+                min_probability = st.slider(
+                    t("kam.min_probability", ui_lang),
+                    0.0, 0.95, 0.50, 0.05, key="exp_min_prob",
+                )
+            with fc4:
+                pred_window = st.slider(
+                    t("kam.prediction_window", ui_lang),
+                    7, 90, 30, 7, key="exp_pred_window",
+                )
+
+        fc_df = apply_forecast_filters(
+            fc_df_all,
+            retailer=fc_retailer,
+            product_query=product_query,
+            min_probability=min_probability,
+            signal=None,
+            price_trend=None,
+            only_future=True,
+            prediction_window_days=pred_window,
+        )
+
+        # ── KAM KPI row ───────────────────────────────────────────────────────
+        n_high = int((fc_df["signal"] == "Hoch relevant").sum()) if not fc_df.empty else 0
+        n_rising = int((fc_df["price_trend"] == "steigend").sum()) if not fc_df.empty else 0
+        n_overdue_exp = 0
+        if not fc_df.empty:
+            n_overdue_exp = int(
+                fc_df.apply(
+                    lambda r: (
+                        r.get("avg_cycle_days") is not None
+                        and r.get("days_since_last_promo") is not None
+                        and r["days_since_last_promo"] > r["avg_cycle_days"] * 1.2
+                    ),
+                    axis=1,
+                ).sum()
+            )
+        avg_disc_exp = float("nan")
+        if not fc_df.empty and "typical_discount_pct_max" in fc_df.columns:
+            avg_disc_exp = fc_df["typical_discount_pct_max"].dropna().mean()
+
+        kk1, kk2, kk3, kk4, kk5 = st.columns(5)
+        kk1.metric(t("kpi.high_signal", ui_lang), str(n_high))
+        kk2.metric(t("kpi.rising_price", ui_lang), str(n_rising))
+        kk3.metric(t("kpi.overdue", ui_lang), str(n_overdue_exp))
+        kk4.metric(t("kpi.forecast_base", ui_lang), f"{len(fc_df_all)}")
+        kk5.metric(t("kpi.avg_discount", ui_lang), f"{avg_disc_exp:.0f} %" if pd.notna(avg_disc_exp) else "—")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Forecast table ────────────────────────────────────────────────────
+        if fc_df.empty:
+            if fc_df_all.empty:
+                st.info(t("kam.no_history", ui_lang,
+                          n=MIN_HISTORICAL_PROMOS_PER_PRODUCT_RETAILER,
+                          d=MIN_HISTORY_DAYS))
+            else:
+                st.info(t("kam.no_filter_match", ui_lang))
+        else:
+            def _fmt_period(row):
+                s = row.get("expected_start")
+                e = row.get("expected_end")
+                if s is None:
+                    return "—"
+                s_str = s.strftime("%d.%m.%Y") if hasattr(s, "strftime") else str(s)
+                if e is None:
+                    return s_str
+                e_str = e.strftime("%d.%m.%Y") if hasattr(e, "strftime") else str(e)
+                return f"{s_str} – {e_str}"
+
+            _trend_labels = {
+                "steigend": t("trend.rising", ui_lang),
+                "fallend":  t("trend.falling", ui_lang),
+                "stabil":   t("trend.stable", ui_lang),
+                "unbekannt": t("trend.unknown", ui_lang),
+            }
+
+            def _fmt_trend(row):
+                raw = row.get("price_trend") or "unbekannt"
+                pct = row.get("price_trend_pct")
+                label = _trend_labels.get(raw, raw)
+                if raw == "unbekannt" or pct is None:
+                    return label
+                arrow = "▲" if raw == "steigend" else ("▼" if raw == "fallend" else "→")
+                return f"{arrow} {label} ({pct:+.1f} %)"
+
+            def _fmt_last_promo(row):
+                d = row.get("days_since_last_promo")
+                if d is None:
+                    return "—"
+                return t("general.days_ago", ui_lang, d=d)
+
+            def _fmt_cycle(row):
+                avg = row.get("avg_cycle_days")
+                med = row.get("median_cycle_days")
+                if avg is None and med is None:
+                    return "—"
+                if med is not None:
+                    return f"{med} {t('general.days', ui_lang)}"
+                return f"{avg} {t('general.days', ui_lang)}"
+
+            _signal_map = {
+                "Hoch relevant":   t("signal.high", ui_lang),
+                "Beobachten":      t("signal.watch", ui_lang),
+                "Normal":          t("signal.normal", ui_lang),
+                "Nicht belastbar": t("signal.unreliable", ui_lang),
+                "Ungültig":        t("signal.invalid", ui_lang),
+            }
+
+            display = fc_df.copy()
+            display[t("col.period", ui_lang)]      = display.apply(_fmt_period, axis=1)
+            display[t("kam.price_trend", ui_lang)] = display.apply(_fmt_trend, axis=1)
+            display[t("col.last_promo", ui_lang)]  = display.apply(_fmt_last_promo, axis=1)
+            display[t("col.cycle", ui_lang)]       = display.apply(_fmt_cycle, axis=1)
+            if "signal" in display.columns:
+                display[t("col.signal", ui_lang)]  = display["signal"].map(_signal_map).fillna(display["signal"])
+            if "probability" in display.columns:
+                display[t("col.probability", ui_lang)] = display["probability"].apply(lambda x: f"{x:.0%}")
+            if "typical_discount_pct_max" in display.columns:
+                display[t("col.discount", ui_lang)] = display["typical_discount_pct_max"].apply(
+                    lambda x: f"{x:.0f} %" if pd.notna(x) else "—"
+                )
+
+            _show_exp_cols = [
+                "product", "brand", "retailer", "country",
+                t("col.period", ui_lang),
+                t("col.last_promo", ui_lang),
+                t("col.cycle", ui_lang),
+                t("col.signal", ui_lang),
+                t("col.probability", ui_lang),
+                t("col.discount", ui_lang),
+                t("kam.price_trend", ui_lang),
+                "justification",
+            ]
+            _show_exp_cols = [c for c in _show_exp_cols if c in display.columns]
+            st.dataframe(
+                display[_show_exp_cols].rename(columns={
+                    "product":      t("cockpit.col_product", ui_lang),
+                    "brand":        t("cockpit.col_brand", ui_lang),
+                    "retailer":     t("cockpit.col_retailer", ui_lang),
+                    "country":      t("monitor.col_market", ui_lang),
+                    "justification": t("cockpit.col_justification", ui_lang),
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=min(35 * len(display) + 45, 600),
+            )
+
+    # ── Sub-tab B: Price Trend Forecast (Prophet) ─────────────────────────────
+    with _exp_tabs[1]:
+        st.markdown(
+            f'<div class="section-header">📈 {t("forecast.tab_title", ui_lang)}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── REQUIRED: Product + Retailer + Market + Currency ──────────────────
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _p_stores(c, _v=CACHE_VERSION):
+            return get_distinct_stores(c)
+
+        @st.cache_data(ttl=120, show_spinner=False)
+        def _hist_price(term, store, country, _v=CACHE_VERSION):
+            return load_price_history(product_name=term or None, retailer=store, country_code=country)
+
+        fc_col1, fc_col2 = st.columns([3, 2])
+        with fc_col1:
+            search_term = st.text_input(
+                t("forecast.product", ui_lang) + " *",
+                value=brand_filter or "",
+                placeholder="Wudy, Coca-Cola, Cedevita…",
+                key="exp_fc_term",
+            )
+        with fc_col2:
+            p_stores_fc = _p_stores(sel_country)
+            sel_price_store_idx = st.selectbox(
+                t("forecast.retailer", ui_lang) + " *",
+                range(len(p_stores_fc) + 1),
+                format_func=lambda i: "— select —" if i == 0 else p_stores_fc[i - 1],
+                key="exp_retailer_pick",
+            )
+            price_store_val = None if sel_price_store_idx == 0 else p_stores_fc[sel_price_store_idx - 1]
+
+        fc_col3, fc_col4, fc_col5 = st.columns([2, 1, 1])
+        with fc_col3:
+            fc_market = sel_country
+            st.text_input(
+                t("forecast.market", ui_lang) + " *",
+                value=(t(f"country.{fc_market}", ui_lang) if fc_market else "— select market in sidebar —"),
+                disabled=True, key="exp_market_disp",
+            )
+        with fc_col4:
+            st.text_input(
+                t("forecast.currency", ui_lang),
+                value=market_currency,
+                disabled=True, key="exp_currency_disp",
+            )
+        with fc_col5:
+            forecast_periods = st.slider(
+                t("forecast.horizon", ui_lang), 7, 90, 30, key="exp_prophet_periods",
+            )
+
+        selection_status = validate_forecast_selection(
+            product=search_term, retailer=price_store_val,
+            market=fc_market, currency=market_currency,
+        )
+
+        run_forecast = st.button(t("forecast.run", ui_lang), type="primary", key="exp_run_fc")
+
+        if selection_status != "ok":
+            st.warning(t("forecast.missing_selection", ui_lang))
+        else:
+            with st.spinner(t("general.loading", ui_lang)):
+                hist_raw_fc = _hist_price(search_term, price_store_val, fc_market)
+                hist_df_fc, hist_audit_fc = build_filtered_view(
+                    hist_raw_fc,
+                    country=fc_market,
+                    brand_query=search_term,
+                )
+
+            _hist_price_col = "price_eur" if not hist_df_fc.empty and "price_eur" in hist_df_fc.columns else "price"
+            _p_sym = "€" if market_currency == "EUR" else market_currency
+
+            if not hist_df_fc.empty and "recorded_at" in hist_df_fc.columns and _hist_price_col in hist_df_fc.columns:
+                st.markdown(
+                    f'<div class="section-header">📈 {t("forecast.historical_price", ui_lang)} – {search_term}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"{len(hist_df_fc):,} · {price_store_val} · {fc_market} · {market_currency}")
+                fig_hist = px.area(
+                    hist_df_fc.sort_values("recorded_at"),
+                    x="recorded_at", y=_hist_price_col,
+                    markers=True,
+                    color_discrete_sequence=[PRIMARY],
+                    labels={
+                        "recorded_at": t("forecast.axis_date", ui_lang),
+                        _hist_price_col: t("forecast.axis_price", ui_lang, currency=market_currency),
+                    },
+                )
+                fig_hist.update_layout(
+                    hovermode="x unified", margin=dict(t=20, b=20),
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),
+                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
+            else:
+                st.info(t("forecast.too_few_points", ui_lang, n=len(hist_df_fc)))
+
+            if run_forecast:
+                obs_count_fc = int(len(hist_df_fc))
+                history_days_fc = 0
+                if obs_count_fc > 0 and "recorded_at" in hist_df_fc.columns:
+                    _ts = pd.to_datetime(hist_df_fc["recorded_at"], errors="coerce").dropna()
+                    if len(_ts) > 1:
+                        history_days_fc = int((_ts.max() - _ts.min()).days)
+
+                eligible = (obs_count_fc >= MIN_OBSERVATIONS and history_days_fc >= MIN_HISTORY_DAYS)
+
+                if production_mode and not eligible:
+                    st.error(
+                        t("exp.eligibility_fail", ui_lang,
+                          min_obs=MIN_OBSERVATIONS, min_days=MIN_HISTORY_DAYS)
+                        + f"  ·  ({obs_count_fc} obs, {history_days_fc} days)"
+                    )
+                else:
+                    with st.spinner(t("general.loading", ui_lang)):
+                        prophet_fig, forecast_df = forecast_price_trend(
+                            df=hist_df_fc,
+                            product_id=search_term,
+                            periods=forecast_periods,
+                            allow_mock=not production_mode,
+                            currency=market_currency,
+                            lang=ui_lang,
+                            title_prefix=f"{search_term} · {price_store_val}",
+                        )
+
+                    st.plotly_chart(prophet_fig, use_container_width=True)
+
+                    if not forecast_df.empty:
+                        fc_p = forecast_df.reset_index(drop=True)
+                        _hist_sorted = hist_df_fc.sort_values("recorded_at") if "recorded_at" in hist_df_fc.columns else hist_df_fc
+                        _last_series = _hist_sorted[_hist_price_col].dropna() if _hist_price_col in _hist_sorted.columns else pd.Series(dtype=float)
+                        last_hist_price = float(_last_series.iloc[-1]) if len(_last_series) > 0 else float(fc_p["yhat"].iloc[0])
+
+                        end_price  = float(fc_p["yhat"].iloc[-1])
+                        min_price  = float(fc_p["yhat"].min())
+                        max_price  = float(fc_p["yhat"].max())
+                        min_pos    = int(fc_p["yhat"].idxmin())
+                        max_pos    = int(fc_p["yhat"].idxmax())
+
+                        if last_hist_price > 0:
+                            price_change_pct = (end_price - last_hist_price) / last_hist_price * 100
+                            max_drop_pct     = max(0.0, (last_hist_price - min_price) / last_hist_price * 100)
+                            max_rise_pct     = max(0.0, (max_price - last_hist_price) / last_hist_price * 100)
+                        else:
+                            price_change_pct = max_drop_pct = max_rise_pct = 0.0
+
+                        try:
+                            min_date_str = fc_p["ds"].iloc[min_pos].strftime("%d.%m.%Y")
+                            max_date_str = fc_p["ds"].iloc[max_pos].strftime("%d.%m.%Y")
+                        except (IndexError, AttributeError):
+                            min_date_str = "—"
+                            max_date_str = "—"
+
+                        drop_delta = t("forecast.no_drop", ui_lang) if max_drop_pct == 0 else f"−{max_drop_pct:.1f} %"
+                        rise_delta = t("forecast.no_rise", ui_lang) if max_rise_pct == 0 else f"+{max_rise_pct:.1f} %"
+
+                        fi1, fi2, fi3, fi4 = st.columns(4)
+                        _exp_kpi_cards = [
+                            (fi1, t("forecast.kpi.future_price", ui_lang, days=forecast_periods),
+                             f"{end_price:.2f} {_p_sym}",
+                             f"{'▼' if price_change_pct < 0 else '▲'} {abs(price_change_pct):.1f} %",
+                             "kpi-card"),
+                            (fi2, t("forecast.kpi.lowest", ui_lang),
+                             f"{min_price:.2f} {_p_sym}", min_date_str, "kpi-card-green"),
+                            (fi3, t("forecast.kpi.highest", ui_lang),
+                             f"{max_price:.2f} {_p_sym}", max_date_str, "kpi-card-red"),
+                            (fi4, t("forecast.kpi.max_drop", ui_lang),
+                             f"{max_drop_pct:.1f} %", drop_delta, "kpi-card-amber"),
+                        ]
+                        for col, label, val, delta, css in _exp_kpi_cards:
+                            col.markdown(
+                                f"""<div class="kpi-card {css}">
+                                  <div class="kpi-label">{label}</div>
+                                  <div class="kpi-value">{val}</div>
+                                  <div class="kpi-delta">{delta}</div>
+                                </div>""",
+                                unsafe_allow_html=True,
+                            )
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        # ── Forecast audit ────────────────────────────────────
+                        work_for_mape = pd.DataFrame({
+                            "ds": pd.to_datetime(hist_df_fc["recorded_at"], errors="coerce"),
+                            "y": pd.to_numeric(hist_df_fc[_hist_price_col], errors="coerce"),
+                        }).dropna().sort_values("ds")
+                        mape, mae, bias = compute_backtest_mape(work_for_mape)
+                        trust_key = compute_trust_level(mape, obs_count_fc, history_days_fc)
+
+                        trust_label = {
+                            "belastbar":       "✅ " + t("trust.belastbar", ui_lang),
+                            "eingeschr":       "⚠️ " + t("trust.eingeschr", ui_lang),
+                            "nicht_belastbar": "❌ " + t("trust.nicht_belastbar", ui_lang),
+                        }[trust_key]
+
+                        with st.expander(t("forecast.audit_title", ui_lang), expanded=True):
+                            a1, a2, a3 = st.columns(3)
+                            with a1:
+                                st.markdown(f"**{t('forecast.audit.status', ui_lang)}:** "
+                                            + ("ok" if eligible else t("status.insufficient_history", ui_lang)))
+                                st.markdown(f"**{t('forecast.audit.trust', ui_lang)}:** {trust_label}")
+                                st.markdown(f"**{t('forecast.audit.source', ui_lang)}:** "
+                                            + (t('build.supabase', ui_lang) if production_mode else t('build.mock', ui_lang)))
+                            with a2:
+                                st.markdown(f"**{t('forecast.audit.observations', ui_lang)}:** {obs_count_fc}")
+                                st.markdown(f"**{t('forecast.audit.history_days', ui_lang)}:** {history_days_fc}")
+                            with a3:
+                                mape_disp = f"{mape*100:.1f} %" if not pd.isna(mape) else "—"
+                                st.markdown(f"**{t('forecast.audit.mape', ui_lang)}:** {mape_disp}")
+                                st.markdown(f"**{t('forecast.currency', ui_lang)}:** {market_currency}")
+                                st.markdown(f"**{t('forecast.retailer', ui_lang)}:** {price_store_val}")
+                    else:
+                        st.warning(t("forecast.prophet_failed", ui_lang))

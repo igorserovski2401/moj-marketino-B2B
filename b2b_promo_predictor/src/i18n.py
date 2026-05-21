@@ -426,6 +426,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "EN": "Category uncertain", "HR": "Kategorija nesigurna", "SL": "Kategorija negotova",
         "BS": "Kategorija nesigurna", "SR": "Kategorija nesigurna", "MK": "Категорија несигурна", "ME": "Kategorija nesigurna",
     },
+    "dq.total_records": {
+        "EN": "Total records", "HR": "Ukupno zapisa", "SL": "Skupaj zapisov",
+        "BS": "Ukupno zapisa", "SR": "Ukupno zapisa", "MK": "Вкупно записи", "ME": "Ukupno zapisa",
+    },
+    "dq.complete_pct": {
+        "EN": "Complete records", "HR": "Kompletni zapisi", "SL": "Popolni zapisi",
+        "BS": "Kompletni zapisi", "SR": "Kompletni zapisi", "MK": "Комплетни записи", "ME": "Kompletni zapisi",
+    },
+    "dq.avg_match_score": {
+        "EN": "Avg. match score", "HR": "Prosj. ocjena podudaranja", "SL": "Povp. ocena ujemanja",
+        "BS": "Prosj. ocjena podudaranja", "SR": "Prosj. ocena podudaranja",
+        "MK": "Просечен резултат за совпаѓање", "ME": "Prosj. ocjena podudaranja",
+    },
+    "dq.low_score_warning": {
+        "EN": "⚠️ {pct}% of records have a match score below 0.85 — review entity matching.",
+        "HR": "⚠️ {pct}% zapisa ima ocjenu podudaranja ispod 0.85 — pregledajte entitetsko podudaranje.",
+        "SL": "⚠️ {pct}% zapisov ima oceno ujemanja pod 0.85 — preglejte ujemanje entitet.",
+        "BS": "⚠️ {pct}% zapisa ima ocjenu podudaranja ispod 0.85 — pregledajte entitetsko podudaranje.",
+        "SR": "⚠️ {pct}% zapisa ima ocenu podudaranja ispod 0.85 — pregledajte entitetsko podudaranje.",
+        "MK": "⚠️ {pct}% записи имаат резултат за совпаѓање под 0.85 — прегледајте го совпаѓањето на ентитети.",
+        "ME": "⚠️ {pct}% zapisa ima ocjenu podudaranja ispod 0.85 — pregledajte entitetsko podudaranje.",
+    },
+    "dq.no_data": {
+        "EN": "No data available for quality analysis.",
+        "HR": "Nema podataka za analizu kvalitete.",
+        "SL": "Za analizo kakovosti ni podatkov.",
+        "BS": "Nema podataka za analizu kvaliteta.",
+        "SR": "Nema podataka za analizu kvaliteta.",
+        "MK": "Нема податоци за анализа на квалитетот.",
+        "ME": "Nema podataka za analizu kvaliteta.",
+    },
     # ── General ──
     "general.days": {
         "EN": "days", "HR": "dana", "SL": "dni",
@@ -1075,6 +1106,728 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "EN": "Not reliable", "HR": "Nije pouzdano", "SL": "Ni zanesljivo",
         "BS": "Nije pouzdano", "SR": "Nije pouzdano", "MK": "Не е веродостоен",
         "ME": "Nije pouzdano",
+    },
+    # ── Tab navigation ──────────────────────────────────────────────────────
+    "tab.cockpit": {
+        "EN": "🎯 KAM Cockpit", "HR": "🎯 KAM Cockpit", "SL": "🎯 KAM Kokpit",
+        "BS": "🎯 KAM Cockpit", "SR": "🎯 KAM Kokpit",
+        "MK": "🎯 KAM Коkпит", "ME": "🎯 KAM Kokpit",
+    },
+    "tab.monitor": {
+        "EN": "📋 Promo Monitor", "HR": "📋 Promo Monitor", "SL": "📋 Promo Monitor",
+        "BS": "📋 Promo Monitor", "SR": "📋 Promo Monitor",
+        "MK": "📋 Промо Монитор", "ME": "📋 Promo Monitor",
+    },
+    "tab.history": {
+        "EN": "📈 Product History", "HR": "📈 Povijest proizvoda", "SL": "📈 Zgodovina izdelka",
+        "BS": "📈 Historija proizvoda", "SR": "📈 Istorija proizvoda",
+        "MK": "📈 Историја на производот", "ME": "📈 Istorija proizvoda",
+    },
+    "tab.benchmark": {
+        "EN": "⚔️ Benchmark", "HR": "⚔️ Usporedba", "SL": "⚔️ Primerjava",
+        "BS": "⚔️ Usporedba", "SR": "⚔️ Poređenje",
+        "MK": "⚔️ Споредба", "ME": "⚔️ Poređenje",
+    },
+    "tab.alerts": {
+        "EN": "🚨 Alerts", "HR": "🚨 Upozorenja", "SL": "🚨 Opozorila",
+        "BS": "🚨 Upozorenja", "SR": "🚨 Upozorenja",
+        "MK": "🚨 Предупредувања", "ME": "🚨 Upozorenja",
+    },
+    "tab.quality": {
+        "EN": "🛡️ Data Quality", "HR": "🛡️ Kvaliteta podataka", "SL": "🛡️ Kakovost podatkov",
+        "BS": "🛡️ Kvaliteta podataka", "SR": "🛡️ Kvalitet podataka",
+        "MK": "🛡️ Квалитет на податоци", "ME": "🛡️ Kvalitet podataka",
+    },
+    "tab.forecast": {
+        "EN": "🧪 Experimental Forecast", "HR": "🧪 Eksperimentalna prognoza", "SL": "🧪 Eksperimentalna napoved",
+        "BS": "🧪 Eksperimentalna prognoza", "SR": "🧪 Eksperimentalna prognoza",
+        "MK": "🧪 Eксперименталнa Прогноза", "ME": "🧪 Eksperimentalna prognoza",
+    },
+    # ── KAM Cockpit ─────────────────────────────────────────────────────────
+    "cockpit.title": {
+        "EN": "KAM Cockpit", "HR": "KAM Kokpit", "SL": "KAM Kokpit",
+        "BS": "KAM Kokpit", "SR": "KAM Kokpit", "MK": "KAM Коkпит", "ME": "KAM Kokpit",
+    },
+    "cockpit.subtitle": {
+        "EN": "Action briefings for key account managers — based on verified promotion history.",
+        "HR": "Pregled akcija za key account menadžere — na temelju verificirane povijesti promocija.",
+        "SL": "Pregled akcij za key account managerje — na podlagi preverjene zgodovine promocij.",
+        "BS": "Pregled akcija za key account menadžere — na osnovu verificirane historije promocija.",
+        "SR": "Pregled akcija za key account menadžere — na osnovu verifikovane istorije promocija.",
+        "MK": "Преглед на акции за key account менаџери — врз основа на верификувана историја на промоции.",
+        "ME": "Pregled akcija za key account menadžere — na osnovu verifikovane istorije promocija.",
+    },
+    "cockpit.action_briefing": {
+        "EN": "Action Briefing", "HR": "Pregled akcija", "SL": "Pregled akcij",
+        "BS": "Pregled akcija", "SR": "Pregled akcija", "MK": "Преглед на акции", "ME": "Pregled akcija",
+    },
+    "cockpit.overdue": {
+        "EN": "Overdue", "HR": "Zakasnjelo", "SL": "Zamujeno",
+        "BS": "Zakasnilo", "SR": "Zakasnjeno", "MK": "Задоцнето", "ME": "Zakasnjelo",
+    },
+    "cockpit.near_cycle": {
+        "EN": "Near cycle end", "HR": "Blizu kraja ciklusa", "SL": "Blizu konca ciklusa",
+        "BS": "Blizu kraja ciklusa", "SR": "Blizu kraja ciklusa",
+        "MK": "Близу крај на циклус", "ME": "Blizu kraja ciklusa",
+    },
+    "cockpit.last_promo": {
+        "EN": "Last promotion", "HR": "Posljednja promocija", "SL": "Zadnja promocija",
+        "BS": "Posljednja promocija", "SR": "Poslednja promocija",
+        "MK": "Последна промоција", "ME": "Posljednja promocija",
+    },
+    "cockpit.typical_cycle": {
+        "EN": "Typical cycle", "HR": "Tipični ciklus", "SL": "Tipičen cikel",
+        "BS": "Tipičan ciklus", "SR": "Tipičan ciklus",
+        "MK": "Типичен циклус", "ME": "Tipičan ciklus",
+    },
+    "cockpit.days_since": {
+        "EN": "Days since last promo", "HR": "Dana od zadnje akcije", "SL": "Dni od zadnje akcije",
+        "BS": "Dana od zadnje akcije", "SR": "Dana od poslednje akcije",
+        "MK": "Дена од последна акција", "ME": "Dana od poslednje akcije",
+    },
+    "cockpit.historical_n": {
+        "EN": "Historical promotions", "HR": "Povijesne promocije", "SL": "Zgodovinske promocije",
+        "BS": "Historijske promocije", "SR": "Istorijske promocije",
+        "MK": "Историски промоции", "ME": "Istorijske promocije",
+    },
+    "cockpit.last_price": {
+        "EN": "Last promo price", "HR": "Zadnja akcijska cijena", "SL": "Zadnja promocijska cena",
+        "BS": "Zadnja akcijska cijena", "SR": "Poslednja akcijska cena",
+        "MK": "Последна акциска цена", "ME": "Poslednja akcijska cijena",
+    },
+    "cockpit.recommendation": {
+        "EN": "Recommendation", "HR": "Preporuka", "SL": "Priporočilo",
+        "BS": "Preporuka", "SR": "Preporuka", "MK": "Препорака", "ME": "Preporuka",
+    },
+    "cockpit.no_briefings": {
+        "EN": "No action briefings available for the current selection. Try expanding the market or category filter.",
+        "HR": "Nema dostupnih pregleda akcija za trenutni odabir. Pokušaj proširiti filter tržišta ili kategorije.",
+        "SL": "Za trenutno izbiro ni razpoložljivih pregledov akcij. Poskusi razširiti filter trga ali kategorije.",
+        "BS": "Nema dostupnih pregleda akcija za trenutni odabir. Pokušaj proširiti filter tržišta ili kategorije.",
+        "SR": "Nema dostupnih pregleda akcija za trenutni odabir. Pokušaj proširiti filter tržišta ili kategorije.",
+        "MK": "Нема достапни прегледи на акции за тековниот избор. Обиди се да го прошириш филтерот на пазар или категорија.",
+        "ME": "Nema dostupnih pregleda akcija za trenutni odabir. Pokušaj proširiti filter tržišta ili kategorije.",
+    },
+    "cockpit.col_priority": {
+        "EN": "Priority", "HR": "Prioritet", "SL": "Prioriteta",
+        "BS": "Prioritet", "SR": "Prioritet", "MK": "Приоритет", "ME": "Prioritet",
+    },
+    "cockpit.col_retailer": {
+        "EN": "Retailer", "HR": "Prodavaonica", "SL": "Trgovec",
+        "BS": "Prodavnica", "SR": "Prodavnica", "MK": "Продавница", "ME": "Prodavnica",
+    },
+    "cockpit.col_brand": {
+        "EN": "Brand", "HR": "Marka", "SL": "Znamka",
+        "BS": "Marka", "SR": "Marka", "MK": "Марка", "ME": "Marka",
+    },
+    "cockpit.col_product": {
+        "EN": "Product", "HR": "Proizvod", "SL": "Izdelek",
+        "BS": "Proizvod", "SR": "Proizvod", "MK": "Производ", "ME": "Proizvod",
+    },
+    "cockpit.col_signal": {
+        "EN": "Signal", "HR": "Signal", "SL": "Signal",
+        "BS": "Signal", "SR": "Signal", "MK": "Сигнал", "ME": "Signal",
+    },
+    "cockpit.col_days_since": {
+        "EN": "Days since", "HR": "Dana od", "SL": "Dni od",
+        "BS": "Dana od", "SR": "Dana od", "MK": "Дена од", "ME": "Dana od",
+    },
+    "cockpit.col_cycle": {
+        "EN": "Avg. cycle", "HR": "Ø ciklus", "SL": "Ø cikel",
+        "BS": "Ø ciklus", "SR": "Ø ciklus", "MK": "Ø циклус", "ME": "Ø ciklus",
+    },
+    "cockpit.col_price": {
+        "EN": "Last price", "HR": "Zadnja cijena", "SL": "Zadnja cena",
+        "BS": "Zadnja cijena", "SR": "Poslednja cena", "MK": "Последна цена", "ME": "Poslednja cijena",
+    },
+    "cockpit.col_trust": {
+        "EN": "Trust", "HR": "Pouzdanost", "SL": "Zanesljivost",
+        "BS": "Pouzdanost", "SR": "Pouzdanost", "MK": "Доверливост", "ME": "Pouzdanost",
+    },
+    "cockpit.col_justification": {
+        "EN": "Evidence", "HR": "Dokaz", "SL": "Dokaz",
+        "BS": "Dokaz", "SR": "Dokaz", "MK": "Доказ", "ME": "Dokaz",
+    },
+    "cockpit.recommend_prepare": {
+        "EN": "Prepare account discussion — promotion window overdue.",
+        "HR": "Pripremi razgovor s računom — promocijsko okno je prošlo.",
+        "SL": "Pripravi pogovor z računom — promocijsko okno je zamujeno.",
+        "BS": "Pripremi razgovor s računom — promocijsko okno je prošlo.",
+        "SR": "Pripremi razgovor s nalogom — promocijski prozor je prošao.",
+        "MK": "Подготви разговор со сметката — промотивниот прозор е задоцнет.",
+        "ME": "Pripremi razgovor s nalogom — promotivni prozor je prošao.",
+    },
+    "cockpit.recommend_monitor": {
+        "EN": "Monitor — promotion expected within cycle window.",
+        "HR": "Prati — promocija se očekuje unutar ciklusnog prozora.",
+        "SL": "Spremljaj — promocija se pričakuje v oknu ciklusa.",
+        "BS": "Prati — promocija se očekuje unutar ciklusnog prozora.",
+        "SR": "Prati — promocija se očekuje unutar ciklusnog prozora.",
+        "MK": "Следи — промоцијата се очекува во рамките на прозорецот на циклусот.",
+        "ME": "Prati — promocija se očekuje unutar ciklusnog prozora.",
+    },
+    # ── Promo Monitor ────────────────────────────────────────────────────────
+    "monitor.title": {
+        "EN": "Promo Monitor", "HR": "Promo Monitor", "SL": "Promo Monitor",
+        "BS": "Promo Monitor", "SR": "Promo Monitor", "MK": "Промо Монитор", "ME": "Promo Monitor",
+    },
+    "monitor.subtitle": {
+        "EN": "Current and upcoming promotions across Balkan markets.",
+        "HR": "Trenutne i nadolazeće promocije na balkanskim tržištima.",
+        "SL": "Trenutne in prihajajoče promocije na balkanskih trgih.",
+        "BS": "Trenutne i nadolazeće promocije na balkanskim tržištima.",
+        "SR": "Trenutne i nadolazeće promocije na balkanskim tržištima.",
+        "MK": "Тековни и претстојни промоции на балканските пазари.",
+        "ME": "Trenutne i nadolazeće promocije na balkanskim tržištima.",
+    },
+    "monitor.no_data": {
+        "EN": "No promotions found for the current filter selection.",
+        "HR": "Nisu pronađene promocije za trenutni odabir filtera.",
+        "SL": "Za trenutno izbiro filtrov ni promocij.",
+        "BS": "Nisu pronađene promocije za trenutni odabir filtera.",
+        "SR": "Nisu pronađene promocije za trenutni odabir filtera.",
+        "MK": "Не се пронајдени промоции за тековниот избор на филтри.",
+        "ME": "Nisu pronađene promocije za trenutni odabir filtera.",
+    },
+    "monitor.filter_real_discount": {
+        "EN": "Only real discount", "HR": "Samo pravi popusti", "SL": "Samo pravi popusti",
+        "BS": "Samo pravi popusti", "SR": "Samo pravi popusti",
+        "MK": "Само реален попуст", "ME": "Samo pravi popusti",
+    },
+    "monitor.filter_with_brand": {
+        "EN": "Only with brand", "HR": "Samo s markom", "SL": "Samo z znamko",
+        "BS": "Samo s markom", "SR": "Samo s markom", "MK": "Само со марка", "ME": "Samo s markom",
+    },
+    "monitor.filter_reliable": {
+        "EN": "Only reliable entity matches", "HR": "Samo pouzdana podudaranja", "SL": "Samo zanesljiva ujemanja",
+        "BS": "Samo pouzdana podudaranja", "SR": "Samo pouzdana podudaranja",
+        "MK": "Само сигурни совпаѓања", "ME": "Samo pouzdana podudaranja",
+    },
+    "monitor.export": {
+        "EN": "⬇ Export CSV", "HR": "⬇ Izvoz CSV", "SL": "⬇ Izvoz CSV",
+        "BS": "⬇ Izvoz CSV", "SR": "⬇ Izvoz CSV", "MK": "⬇ Извоз CSV", "ME": "⬇ Izvoz CSV",
+    },
+    "monitor.dq_complete": {
+        "EN": "✅ Complete", "HR": "✅ Potpuno", "SL": "✅ Popolno",
+        "BS": "✅ Potpuno", "SR": "✅ Potpuno", "MK": "✅ Комплетно", "ME": "✅ Potpuno",
+    },
+    "monitor.dq_no_brand": {
+        "EN": "⚠ Brand missing", "HR": "⚠ Marka nedostaje", "SL": "⚠ Znamka manjka",
+        "BS": "⚠ Marka nedostaje", "SR": "⚠ Marka nedostaje", "MK": "⚠ Марка недостасува", "ME": "⚠ Marka nedostaje",
+    },
+    "monitor.dq_no_regular": {
+        "EN": "⚠ No regular price", "HR": "⚠ Nema redovne cijene", "SL": "⚠ Ni redovne cene",
+        "BS": "⚠ Nema redovne cijene", "SR": "⚠ Nema redovne cene",
+        "MK": "⚠ Нема редовна цена", "ME": "⚠ Nema redovne cijene",
+    },
+    "monitor.dq_no_discount": {
+        "EN": "⚠ No real discount", "HR": "⚠ Nema pravog popusta", "SL": "⚠ Ni pravega popusta",
+        "BS": "⚠ Nema pravog popusta", "SR": "⚠ Nema pravog popusta",
+        "MK": "⚠ Нема реален попуст", "ME": "⚠ Nema pravog popusta",
+    },
+    "monitor.dq_cat_uncertain": {
+        "EN": "⚠ Category uncertain", "HR": "⚠ Kategorija nesigurna", "SL": "⚠ Kategorija negotova",
+        "BS": "⚠ Kategorija nesigurna", "SR": "⚠ Kategorija nesigurna",
+        "MK": "⚠ Категорија несигурна", "ME": "⚠ Kategorija nesigurna",
+    },
+    "monitor.dq_low_match": {
+        "EN": "⚠ Low match confidence", "HR": "⚠ Niska pouzdanost podudaranja", "SL": "⚠ Nizka zanesljivost ujemanja",
+        "BS": "⚠ Niska pouzdanost podudaranja", "SR": "⚠ Niska pouzdanost podudaranja",
+        "MK": "⚠ Ниска доверливост на совпаѓање", "ME": "⚠ Niska pouzdanost podudaranja",
+    },
+    "monitor.col_retailer": {
+        "EN": "Retailer", "HR": "Prodavaonica", "SL": "Trgovec",
+        "BS": "Prodavnica", "SR": "Prodavnica", "MK": "Продавница", "ME": "Prodavnica",
+    },
+    "monitor.col_product": {
+        "EN": "Product", "HR": "Proizvod", "SL": "Izdelek",
+        "BS": "Proizvod", "SR": "Proizvod", "MK": "Производ", "ME": "Proizvod",
+    },
+    "monitor.col_brand": {
+        "EN": "Brand", "HR": "Marka", "SL": "Znamka",
+        "BS": "Marka", "SR": "Marka", "MK": "Марка", "ME": "Marka",
+    },
+    "monitor.col_market": {
+        "EN": "Market", "HR": "Tržište", "SL": "Trg",
+        "BS": "Tržište", "SR": "Tržište", "MK": "Пазар", "ME": "Tržište",
+    },
+    "monitor.col_category": {
+        "EN": "Category", "HR": "Kategorija", "SL": "Kategorija",
+        "BS": "Kategorija", "SR": "Kategorija", "MK": "Категорија", "ME": "Kategorija",
+    },
+    "monitor.col_promo_price": {
+        "EN": "Promo Price", "HR": "Akcijska cijena", "SL": "Promocijska cena",
+        "BS": "Akcijska cijena", "SR": "Akcijska cena", "MK": "Акциска цена", "ME": "Akcijska cijena",
+    },
+    "monitor.col_regular_price": {
+        "EN": "Regular Price", "HR": "Redovna cijena", "SL": "Redna cena",
+        "BS": "Redovna cijena", "SR": "Redovna cena", "MK": "Редовна цена", "ME": "Redovna cijena",
+    },
+    "monitor.col_discount": {
+        "EN": "Discount %", "HR": "Popust %", "SL": "Popust %",
+        "BS": "Popust %", "SR": "Popust %", "MK": "Попуст %", "ME": "Popust %",
+    },
+    "monitor.col_valid_from": {
+        "EN": "Valid From", "HR": "Vrijedi od", "SL": "Velja od",
+        "BS": "Vrijedi od", "SR": "Važi od", "MK": "Важи од", "ME": "Važi od",
+    },
+    "monitor.col_valid_until": {
+        "EN": "Valid Until", "HR": "Vrijedi do", "SL": "Velja do",
+        "BS": "Vrijedi do", "SR": "Važi do", "MK": "Важи до", "ME": "Važi do",
+    },
+    "monitor.col_currency": {
+        "EN": "Currency", "HR": "Valuta", "SL": "Valuta",
+        "BS": "Valuta", "SR": "Valuta", "MK": "Валута", "ME": "Valuta",
+    },
+    "monitor.col_dq": {
+        "EN": "Data Quality", "HR": "Kvaliteta podataka", "SL": "Kakovost podatkov",
+        "BS": "Kvaliteta podataka", "SR": "Kvalitet podataka", "MK": "Квалитет на податоци", "ME": "Kvalitet podataka",
+    },
+    # ── Product History ──────────────────────────────────────────────────────
+    "history.title": {
+        "EN": "Product History", "HR": "Povijest proizvoda", "SL": "Zgodovina izdelka",
+        "BS": "Historija proizvoda", "SR": "Istorija proizvoda",
+        "MK": "Историја на производот", "ME": "Istorija proizvoda",
+    },
+    "history.select_prompt": {
+        "EN": "Select a product, retailer and market to view promotion history.",
+        "HR": "Odaberi proizvod, prodavaonicu i tržište za prikaz povijesti promocija.",
+        "SL": "Izberi izdelek, trgovca in trg za prikaz zgodovine promocij.",
+        "BS": "Odaberi proizvod, prodavnicu i tržište za prikaz historije promocija.",
+        "SR": "Odaberi proizvod, prodavnicu i tržište za prikaz istorije promocija.",
+        "MK": "Избери производ, продавница и пазар за преглед на историјата на промоции.",
+        "ME": "Odaberi proizvod, prodavnicu i tržište za prikaz istorije promocija.",
+    },
+    "history.no_data": {
+        "EN": "No promotion history found for this selection.",
+        "HR": "Nije pronađena povijest promocija za ovaj odabir.",
+        "SL": "Za to izbiro ni zgodovine promocij.",
+        "BS": "Nije pronađena historija promocija za ovaj odabir.",
+        "SR": "Nije pronađena istorija promocija za ovaj odabir.",
+        "MK": "Не е пронајдена историја на промоции за овој избор.",
+        "ME": "Nije pronađena istorija promocija za ovaj odabir.",
+    },
+    "history.col_period": {
+        "EN": "Period", "HR": "Razdoblje", "SL": "Obdobje",
+        "BS": "Period", "SR": "Period", "MK": "Период", "ME": "Period",
+    },
+    "history.col_price": {
+        "EN": "Promo Price", "HR": "Akcijska cijena", "SL": "Akcijska cena",
+        "BS": "Akcijska cijena", "SR": "Akcijska cena", "MK": "Акциска цена", "ME": "Akcijska cijena",
+    },
+    "history.col_discount": {
+        "EN": "Discount %", "HR": "Popust %", "SL": "Popust %",
+        "BS": "Popust %", "SR": "Popust %", "MK": "Попуст %", "ME": "Popust %",
+    },
+    "history.col_duration": {
+        "EN": "Duration (days)", "HR": "Trajanje (dana)", "SL": "Trajanje (dni)",
+        "BS": "Trajanje (dana)", "SR": "Trajanje (dana)", "MK": "Траење (дена)", "ME": "Trajanje (dana)",
+    },
+    "history.stat_total": {
+        "EN": "Total promotions", "HR": "Ukupno promocija", "SL": "Skupaj promocij",
+        "BS": "Ukupno promocija", "SR": "Ukupno promocija", "MK": "Вкупно промоции", "ME": "Ukupno promocija",
+    },
+    "history.stat_median_cycle": {
+        "EN": "Median cycle", "HR": "Medijan ciklusa", "SL": "Mediana ciklusa",
+        "BS": "Medijan ciklusa", "SR": "Medijan ciklusa", "MK": "Медијан циклус", "ME": "Medijan ciklusa",
+    },
+    "history.stat_min_price": {
+        "EN": "Lowest price", "HR": "Najniža cijena", "SL": "Najnižja cena",
+        "BS": "Najniža cijena", "SR": "Najniža cena", "MK": "Најниска цена", "ME": "Najniža cijena",
+    },
+    "history.stat_max_price": {
+        "EN": "Highest price", "HR": "Najviša cijena", "SL": "Najvišja cena",
+        "BS": "Najviša cijena", "SR": "Najviša cena", "MK": "Највисока цена", "ME": "Najviša cijena",
+    },
+    "history.stat_median_price": {
+        "EN": "Median price", "HR": "Medijan cijene", "SL": "Mediana cene",
+        "BS": "Medijan cijene", "SR": "Medijan cene", "MK": "Медијан цена", "ME": "Medijan cijene",
+    },
+    "history.stat_last": {
+        "EN": "Last promotion", "HR": "Posljednja promocija", "SL": "Zadnja promocija",
+        "BS": "Posljednja promocija", "SR": "Poslednja promocija",
+        "MK": "Последна промоција", "ME": "Posljednja promocija",
+    },
+    "history.stat_days_since": {
+        "EN": "Days since last", "HR": "Dana od zadnje", "SL": "Dni od zadnje",
+        "BS": "Dana od zadnje", "SR": "Dana od poslednje", "MK": "Дена од последна", "ME": "Dana od poslednje",
+    },
+    "history.select_product": {
+        "EN": "Product", "HR": "Proizvod", "SL": "Izdelek",
+        "BS": "Proizvod", "SR": "Proizvod", "MK": "Производ", "ME": "Proizvod",
+    },
+    "history.select_retailer": {
+        "EN": "Retailer", "HR": "Prodavaonica", "SL": "Trgovec",
+        "BS": "Prodavnica", "SR": "Prodavnica", "MK": "Продавница", "ME": "Prodavnica",
+    },
+    # ── Competitive Benchmark ────────────────────────────────────────────────
+    "bench.title": {
+        "EN": "Competitive Benchmark", "HR": "Konkurentska usporedba", "SL": "Konkurenčna primerjava",
+        "BS": "Konkurentska usporedba", "SR": "Konkurentsko poređenje",
+        "MK": "Конкурентска споредба", "ME": "Konkurentsko poređenje",
+    },
+    "bench.subtitle": {
+        "EN": "Brand vs. competitors within category — based on verified promotion history.",
+        "HR": "Marka vs. konkurencija unutar kategorije — na temelju verificirane povijesti promocija.",
+        "SL": "Znamka vs. konkurenti znotraj kategorije — na podlagi preverjene zgodovine promocij.",
+        "BS": "Marka vs. konkurencija unutar kategorije — na osnovu verificirane historije promocija.",
+        "SR": "Marka vs. konkurencija unutar kategorije — na osnovu verifikovane istorije promocija.",
+        "MK": "Марка vs. конкуренти во категоријата — врз основа на верификувана историја на промоции.",
+        "ME": "Marka vs. konkurencija unutar kategorije — na osnovu verifikovane istorije promocija.",
+    },
+    "bench.select_category": {
+        "EN": "Select category for comparison", "HR": "Odaberi kategoriju za usporedbu", "SL": "Izberi kategorijo za primerjavo",
+        "BS": "Odaberi kategoriju za usporedbu", "SR": "Odaberi kategoriju za poređenje",
+        "MK": "Избери категорија за споредба", "ME": "Odaberi kategoriju za poređenje",
+    },
+    "bench.no_data": {
+        "EN": "No benchmark data for current selection. Try a broader market or category.",
+        "HR": "Nema podataka za usporedbu za trenutni odabir. Pokušaj šire tržište ili kategoriju.",
+        "SL": "Za trenutno izbiro ni primerjalnih podatkov. Poskusi z večjim trgom ali kategorijo.",
+        "BS": "Nema podataka za usporedbu za trenutni odabir. Pokušaj šire tržište ili kategoriju.",
+        "SR": "Nema podataka za poređenje za trenutni odabir. Pokušaj šire tržište ili kategoriju.",
+        "MK": "Нема податоци за споредба за тековниот избор. Обиди се со поширок пазар или категорија.",
+        "ME": "Nema podataka za poređenje za trenutni odabir. Pokušaj šire tržište ili kategoriju.",
+    },
+    "bench.col_brand": {
+        "EN": "Brand", "HR": "Marka", "SL": "Znamka",
+        "BS": "Marka", "SR": "Marka", "MK": "Марка", "ME": "Marka",
+    },
+    "bench.col_promo_count": {
+        "EN": "Promo count", "HR": "Broj promocija", "SL": "Število promocij",
+        "BS": "Broj promocija", "SR": "Broj promocija", "MK": "Број промоции", "ME": "Broj promocija",
+    },
+    "bench.col_median_price": {
+        "EN": "Median promo price", "HR": "Medijan akcijske cijene", "SL": "Mediana promocijske cene",
+        "BS": "Medijan akcijske cijene", "SR": "Medijan akcijske cene",
+        "MK": "Медијан акциска цена", "ME": "Medijan akcijske cijene",
+    },
+    "bench.col_retailers": {
+        "EN": "Retailer coverage", "HR": "Pokrivenost prodavaonica", "SL": "Pokritost trgovcev",
+        "BS": "Pokrivenost prodavnica", "SR": "Pokrivenost prodavnica",
+        "MK": "Покриеност на продавници", "ME": "Pokrivenost prodavnica",
+    },
+    "bench.col_avg_discount": {
+        "EN": "Avg. discount %", "HR": "Prosj. popust %", "SL": "Povp. popust %",
+        "BS": "Prosj. popust %", "SR": "Prosj. popust %", "MK": "Просечен попуст %", "ME": "Prosj. popust %",
+    },
+    "bench.col_market": {
+        "EN": "Market", "HR": "Tržište", "SL": "Trg",
+        "BS": "Tržište", "SR": "Tržište", "MK": "Пазар", "ME": "Tržište",
+    },
+    "bench.col_retailer": {
+        "EN": "Retailer", "HR": "Trgovac", "SL": "Trgovec",
+        "BS": "Trgovac", "SR": "Trgovac", "MK": "Трговец", "ME": "Trgovac",
+    },
+    "bench.heatmap_title": {
+        "EN": "Promo Frequency by Retailer & Brand", "HR": "Učestalost promo po trgovcu i brandu",
+        "SL": "Pogostost promo po trgovcu in blagovni znamki",
+        "BS": "Učestalost promo po trgovcu i brandu", "SR": "Učestalost promo po trgovcu i brandu",
+        "MK": "Фреквенција на промо по трговец и бренд", "ME": "Učestalost promo po trgovcu i brandu",
+    },
+    "history.chart_title": {
+        "EN": "Promo Price Timeline", "HR": "Vremenski slijed promo cijena",
+        "SL": "Časovni potek promo cen", "BS": "Vremenski slijed promo cijena",
+        "SR": "Vremenski tok promo cena", "MK": "Временска линија на промо цени",
+        "ME": "Vremenski tok promo cijena",
+    },
+    "filter.search_product": {
+        "EN": "Search product…", "HR": "Pretraži proizvod…", "SL": "Iskanje izdelka…",
+        "BS": "Pretražite proizvod…", "SR": "Pretražite proizvod…",
+        "MK": "Пребарај производ…", "ME": "Pretražite proizvod…",
+    },
+    # ── Alerts ───────────────────────────────────────────────────────────────
+    "alert.title": {
+        "EN": "Alerts", "HR": "Upozorenja", "SL": "Opozorila",
+        "BS": "Upozorenja", "SR": "Upozorenja", "MK": "Предупредувања", "ME": "Upozorenja",
+    },
+    "alert.subtitle": {
+        "EN": "Rule-based intelligence alerts — no data fabrication, only verified evidence.",
+        "HR": "Upozorenja temeljena na pravilima — bez izmišljanja podataka, samo verificirani dokazi.",
+        "SL": "Opozorila na podlagi pravil — brez izmišljanja podatkov, samo preverjeni dokazi.",
+        "BS": "Upozorenja temeljena na pravilima — bez izmišljanja podataka, samo verificirani dokazi.",
+        "SR": "Upozorenja temeljena na pravilima — bez izmišljanja podataka, samo verifikovani dokazi.",
+        "MK": "Предупредувања засновани на правила — без измислување на податоци, само верификувани докази.",
+        "ME": "Upozorenja temeljena na pravilima — bez izmišljanja podataka, samo verifikovani dokazi.",
+    },
+    "alert.no_alerts": {
+        "EN": "No alerts for the current filter selection.",
+        "HR": "Nema upozorenja za trenutni odabir filtera.",
+        "SL": "Za trenutno izbiro filtrov ni opozoril.",
+        "BS": "Nema upozorenja za trenutni odabir filtera.",
+        "SR": "Nema upozorenja za trenutni odabir filtera.",
+        "MK": "Нема предупредувања за тековниот избор на филтри.",
+        "ME": "Nema upozorenja za trenutni odabir filtera.",
+    },
+    "alert.sev_high": {
+        "EN": "🔴 High", "HR": "🔴 Visoko", "SL": "🔴 Visoko",
+        "BS": "🔴 Visoko", "SR": "🔴 Visoko", "MK": "🔴 Високо", "ME": "🔴 Visoko",
+    },
+    "alert.sev_medium": {
+        "EN": "🟡 Medium", "HR": "🟡 Srednje", "SL": "🟡 Srednje",
+        "BS": "🟡 Srednje", "SR": "🟡 Srednje", "MK": "🟡 Средно", "ME": "🟡 Srednje",
+    },
+    "alert.sev_low": {
+        "EN": "🟢 Low", "HR": "🟢 Nisko", "SL": "🟢 Nizko",
+        "BS": "🟢 Nisko", "SR": "🟢 Nisko", "MK": "🟢 Ниско", "ME": "🟢 Nisko",
+    },
+    "alert.type_overdue": {
+        "EN": "Product overdue", "HR": "Proizvod zakasnjelo", "SL": "Zamujeni produkt",
+        "BS": "Proizvod zakasnilo", "SR": "Zakasnjeni proizvod",
+        "MK": "Задоцнет производ", "ME": "Zakasnjeli proizvod",
+    },
+    "alert.type_near_cycle": {
+        "EN": "Near cycle end", "HR": "Blizu kraja ciklusa", "SL": "Blizu konca ciklusa",
+        "BS": "Blizu kraja ciklusa", "SR": "Blizu kraja ciklusa",
+        "MK": "Близу крај на циклус", "ME": "Blizu kraja ciklusa",
+    },
+    "alert.type_price_low": {
+        "EN": "Price below historical low", "HR": "Cijena ispod historijskog minimuma", "SL": "Cena pod zgodovinskim minimumom",
+        "BS": "Cijena ispod historijskog minimuma", "SR": "Cena ispod istorijskog minimuma",
+        "MK": "Цена под историски минимум", "ME": "Cijena ispod istorijskog minimuma",
+    },
+    "alert.type_gap": {
+        "EN": "Promotion gap", "HR": "Pauza u promocijama", "SL": "Prekinitev promocij",
+        "BS": "Pauza u promocijama", "SR": "Pauza u promocijama",
+        "MK": "Пауза во промоциите", "ME": "Pauza u promocijama",
+    },
+    "alert.col_severity": {
+        "EN": "Severity", "HR": "Ozbiljnost", "SL": "Resnost",
+        "BS": "Ozbiljnost", "SR": "Ozbiljnost", "MK": "Сериозност", "ME": "Ozbiljnost",
+    },
+    "alert.col_type": {
+        "EN": "Alert type", "HR": "Vrsta upozorenja", "SL": "Vrsta opozorila",
+        "BS": "Vrsta upozorenja", "SR": "Vrsta upozorenja", "MK": "Вид на предупредување", "ME": "Vrsta upozorenja",
+    },
+    "alert.col_market": {
+        "EN": "Market", "HR": "Tržište", "SL": "Trg",
+        "BS": "Tržište", "SR": "Tržište", "MK": "Пазар", "ME": "Tržište",
+    },
+    "alert.col_retailer": {
+        "EN": "Retailer", "HR": "Prodavaonica", "SL": "Trgovec",
+        "BS": "Prodavnica", "SR": "Prodavnica", "MK": "Продавница", "ME": "Prodavnica",
+    },
+    "alert.col_brand": {
+        "EN": "Brand", "HR": "Marka", "SL": "Znamka",
+        "BS": "Marka", "SR": "Marka", "MK": "Марка", "ME": "Marka",
+    },
+    "alert.col_product": {
+        "EN": "Product", "HR": "Proizvod", "SL": "Izdelek",
+        "BS": "Proizvod", "SR": "Proizvod", "MK": "Производ", "ME": "Proizvod",
+    },
+    "alert.col_reason": {
+        "EN": "Reason", "HR": "Razlog", "SL": "Razlog",
+        "BS": "Razlog", "SR": "Razlog", "MK": "Причина", "ME": "Razlog",
+    },
+    "alert.col_action": {
+        "EN": "Recommended action", "HR": "Preporučena akcija", "SL": "Priporočeno dejanje",
+        "BS": "Preporučena akcija", "SR": "Preporučena akcija",
+        "MK": "Препорачана акција", "ME": "Preporučena akcija",
+    },
+    "alert.col_evidence": {
+        "EN": "Evidence", "HR": "Dokaz", "SL": "Dokaz",
+        "BS": "Dokaz", "SR": "Dokaz", "MK": "Доказ", "ME": "Dokaz",
+    },
+    # ── Data Quality tab (fixing hardcoded German) ────────────────────────────
+    "db.title": {
+        "EN": "Database Overview", "HR": "Pregled baze podataka", "SL": "Pregled baze podatkov",
+        "BS": "Pregled baze podataka", "SR": "Pregled baze podataka",
+        "MK": "Преглед на базата на податоци", "ME": "Pregled baze podataka",
+    },
+    "db.status": {
+        "EN": "Database Status", "HR": "Status baze podataka", "SL": "Status baze podatkov",
+        "BS": "Status baze podataka", "SR": "Status baze podataka",
+        "MK": "Статус на базата на податоци", "ME": "Status baze podataka",
+    },
+    "db.source": {
+        "EN": "MarketinoDB · Supabase EU-Central-2", "HR": "MarketinoDB · Supabase EU-Central-2",
+        "SL": "MarketinoDB · Supabase EU-Central-2", "BS": "MarketinoDB · Supabase EU-Central-2",
+        "SR": "MarketinoDB · Supabase EU-Central-2", "MK": "MarketinoDB · Supabase EU-Central-2",
+        "ME": "MarketinoDB · Supabase EU-Central-2",
+    },
+    "db.covered_markets": {
+        "EN": "Covered markets", "HR": "Pokrivena tržišta", "SL": "Pokrita tržišta",
+        "BS": "Pokrivena tržišta", "SR": "Pokrivena tržišta",
+        "MK": "Покриени пазари", "ME": "Pokrivena tržišta",
+    },
+    "db.top_retailers": {
+        "EN": "Top 10 Retailers (product count)", "HR": "Top 10 prodavaonica (broj proizvoda)", "SL": "Top 10 trgovcev (število izdelkov)",
+        "BS": "Top 10 prodavnica (broj proizvoda)", "SR": "Top 10 prodavnica (broj proizvoda)",
+        "MK": "Топ 10 продавници (број на производи)", "ME": "Top 10 prodavnica (broj proizvoda)",
+    },
+    "db.product_data": {
+        "EN": "Product Data", "HR": "Podaci o proizvodima", "SL": "Podatki o izdelkih",
+        "BS": "Podaci o proizvodima", "SR": "Podaci o proizvodima",
+        "MK": "Податоци за производи", "ME": "Podaci o proizvodima",
+    },
+    "db.all_retailers": {
+        "EN": "All retailers", "HR": "Sve prodavaonice", "SL": "Vse trgovine",
+        "BS": "Sve prodavnice", "SR": "Sve prodavnice", "MK": "Сите продавници", "ME": "Sve prodavnice",
+    },
+    "db.sample_size": {
+        "EN": "Sample size", "HR": "Veličina uzorka", "SL": "Velikost vzorca",
+        "BS": "Veličina uzorka", "SR": "Veličina uzorka",
+        "MK": "Големина на примерок", "ME": "Veličina uzorka",
+    },
+    "db.load_btn": {
+        "EN": "🔄 Load", "HR": "🔄 Učitaj", "SL": "🔄 Naloži",
+        "BS": "🔄 Učitaj", "SR": "🔄 Učitaj", "MK": "🔄 Вчитај", "ME": "🔄 Učitaj",
+    },
+    "db.dq_report": {
+        "EN": "🛡️ Data Quality Report", "HR": "🛡️ Izvještaj o kvaliteti podataka", "SL": "🛡️ Poročilo o kakovosti podatkov",
+        "BS": "🛡️ Izvještaj o kvaliteti podataka", "SR": "🛡️ Izveštaj o kvalitetu podataka",
+        "MK": "🛡️ Извештај за квалитет на податоци", "ME": "🛡️ Izvještaj o kvalitetu podataka",
+    },
+    "db.records_total": {
+        "EN": "Total records", "HR": "Ukupno zapisa", "SL": "Skupaj zapisov",
+        "BS": "Ukupno zapisa", "SR": "Ukupno zapisa", "MK": "Вкупно записи", "ME": "Ukupno zapisa",
+    },
+    "db.brands_fixed": {
+        "EN": "✅ Brands corrected", "HR": "✅ Marke ispravljene", "SL": "✅ Znamke popravljene",
+        "BS": "✅ Marke ispravljene", "SR": "✅ Marke ispravljene",
+        "MK": "✅ Марки коригирани", "ME": "✅ Marke ispravljene",
+    },
+    "db.categories_fixed": {
+        "EN": "✅ Categories corrected", "HR": "✅ Kategorije ispravljene", "SL": "✅ Kategorije popravljene",
+        "BS": "✅ Kategorije ispravljene", "SR": "✅ Kategorije ispravljene",
+        "MK": "✅ Категории коригирани", "ME": "✅ Kategorije ispravljene",
+    },
+    "db.prices_valid": {
+        "EN": "✅ Valid prices", "HR": "✅ Valjane cijene", "SL": "✅ Veljavne cene",
+        "BS": "✅ Valjane cijene", "SR": "✅ Valjane cene", "MK": "✅ Валидни цени", "ME": "✅ Valjane cijene",
+    },
+    "db.prices_invalid": {
+        "EN": "❌ Invalid prices", "HR": "❌ Nevaljane cijene", "SL": "❌ Neveljavne cene",
+        "BS": "❌ Nevaljane cijene", "SR": "❌ Nevaljane cene", "MK": "❌ Невалидни цени", "ME": "❌ Nevaljane cijene",
+    },
+    "db.category_dist": {
+        "EN": "📊 Category Distribution", "HR": "📊 Raspodjela kategorija", "SL": "📊 Porazdelitev kategorij",
+        "BS": "📊 Raspodjela kategorija", "SR": "📊 Raspodela kategorija",
+        "MK": "📊 Распределба на категории", "ME": "📊 Raspodela kategorija",
+    },
+    "db.col_count": {
+        "EN": "Count", "HR": "Broj", "SL": "Število",
+        "BS": "Broj", "SR": "Broj", "MK": "Број", "ME": "Broj",
+    },
+    "db.entity_matching": {
+        "EN": "🔗 Entity Matching", "HR": "🔗 Normalizacija entiteta", "SL": "🔗 Normalizacija entitet",
+        "BS": "🔗 Normalizacija entiteta", "SR": "🔗 Normalizacija entiteta",
+        "MK": "🔗 Нормализација на ентитети", "ME": "🔗 Normalizacija entiteta",
+    },
+    "db.matching_subtitle": {
+        "EN": "AI-assisted product normalization via Sentence-Transformer matching.",
+        "HR": "AI-podržana normalizacija proizvoda putem Sentence-Transformer matchinga.",
+        "SL": "Z AI podprta normalizacija izdelkov prek Sentence-Transformer ujemanja.",
+        "BS": "AI-podržana normalizacija proizvoda putem Sentence-Transformer matchinga.",
+        "SR": "AI-podržana normalizacija proizvoda putem Sentence-Transformer matchinga.",
+        "MK": "AI-поддржана нормализација на производи преку Sentence-Transformer совпаѓање.",
+        "ME": "AI-podržana normalizacija proizvoda putem Sentence-Transformer matchinga.",
+    },
+    "db.calendar": {
+        "EN": "📆 Promotion Calendar", "HR": "📆 Kalendar promocija", "SL": "📆 Promocijski koledar",
+        "BS": "📆 Kalendar promocija", "SR": "📆 Kalendar promocija",
+        "MK": "📆 Календар на промоции", "ME": "📆 Kalendar promocija",
+    },
+    "db.no_calendar": {
+        "EN": "No calendar data available.", "HR": "Nema dostupnih kalendarskih podataka.",
+        "SL": "Ni razpoložljivih kalendarskih podatkov.",
+        "BS": "Nema dostupnih kalendarskih podataka.", "SR": "Nema dostupnih kalendarskih podataka.",
+        "MK": "Нема достапни календарски податоци.", "ME": "Nema dostupnih kalendarskih podataka.",
+    },
+    "db.no_promo_dates": {
+        "EN": "No promotions with complete date information.",
+        "HR": "Nema promocija s potpunim datumskim informacijama.",
+        "SL": "Ni promocij s popolnimi datumskimi informacijami.",
+        "BS": "Nema promocija s potpunim datumskim informacijama.",
+        "SR": "Nema promocija s potpunim datumskim informacijama.",
+        "MK": "Нема промоции со целосни информации за датум.",
+        "ME": "Nema promocija s potpunim datumskim informacijama.",
+    },
+    "db.retailer_filter": {
+        "EN": "Retailer", "HR": "Prodavaonica", "SL": "Trgovec",
+        "BS": "Prodavnica", "SR": "Prodavnica", "MK": "Продавница", "ME": "Prodavnica",
+    },
+    "db.col_retailer": {
+        "EN": "Retailer", "HR": "Prodavaonica", "SL": "Trgovec",
+        "BS": "Prodavnica", "SR": "Prodavnica", "MK": "Продавница", "ME": "Prodavnica",
+    },
+    "db.col_product": {
+        "EN": "Product", "HR": "Proizvod", "SL": "Izdelek",
+        "BS": "Proizvod", "SR": "Proizvod", "MK": "Производ", "ME": "Proizvod",
+    },
+    "db.col_brand": {
+        "EN": "Brand (clean)", "HR": "Marka (čista)", "SL": "Znamka (čista)",
+        "BS": "Marka (čista)", "SR": "Marka (čista)", "MK": "Марка (чиста)", "ME": "Marka (čista)",
+    },
+    "db.col_price": {
+        "EN": "Promo price", "HR": "Akcijska cijena", "SL": "Promocijska cena",
+        "BS": "Akcijska cijena", "SR": "Akcijska cena", "MK": "Акциска цена", "ME": "Akcijska cijena",
+    },
+    "db.col_discount": {
+        "EN": "Discount %", "HR": "Popust %", "SL": "Popust %",
+        "BS": "Popust %", "SR": "Popust %", "MK": "Попуст %", "ME": "Popust %",
+    },
+    "db.col_currency": {
+        "EN": "Currency", "HR": "Valuta", "SL": "Valuta",
+        "BS": "Valuta", "SR": "Valuta", "MK": "Валута", "ME": "Valuta",
+    },
+    "db.col_category": {
+        "EN": "Category", "HR": "Kategorija", "SL": "Kategorija",
+        "BS": "Kategorija", "SR": "Kategorija", "MK": "Категорија", "ME": "Kategorija",
+    },
+    # ── KPI labels (fixing 5 hardcoded German labels at app.py lines 477-481) ──
+    "kpi.observed_products": {
+        "EN": "Observed Products", "HR": "Praćeni proizvodi", "SL": "Sledeni izdelki",
+        "BS": "Praćeni proizvodi", "SR": "Praćeni proizvodi",
+        "MK": "Набљудувани производи", "ME": "Praćeni proizvodi",
+    },
+    "kpi.active_retailers": {
+        "EN": "Active Retailers", "HR": "Aktivne prodavaonice", "SL": "Aktivni trgovci",
+        "BS": "Aktivne prodavnice", "SR": "Aktivne prodavnice",
+        "MK": "Активни продавници", "ME": "Aktivne prodavnice",
+    },
+    "kpi.catalogs": {
+        "EN": "Flyers / Catalogues", "HR": "Letci / Katalozi", "SL": "Letaki / Katalogi",
+        "BS": "Letci / Katalozi", "SR": "Letci / Katalozi",
+        "MK": "Летоци / Каталози", "ME": "Letci / Katalozi",
+    },
+    "kpi.markets": {
+        "EN": "Markets", "HR": "Tržišta", "SL": "Trgi",
+        "BS": "Tržišta", "SR": "Tržišta", "MK": "Пазари", "ME": "Tržišta",
+    },
+    "kpi.active_promos_week": {
+        "EN": "Active Promotions (CW)", "HR": "Aktivne promocije (TT)", "SL": "Aktivne promocije (TT)",
+        "BS": "Aktivne promocije (TT)", "SR": "Aktivne promocije (TT)",
+        "MK": "Активни промоции (ТН)", "ME": "Aktivne promocije (TT)",
+    },
+    # ── Experimental Forecast tab ─────────────────────────────────────────────
+    "exp.disclaimer": {
+        "EN": "⚠️ Experimental — only shown when data quality is sufficient (≥12 observations, ≥90 days history). Not a guarantee of future events.",
+        "HR": "⚠️ Eksperimentalno — prikazuje se samo kada je kvaliteta podataka dovoljna (≥12 opservacija, ≥90 dana povijesti). Nije garancija budućih događaja.",
+        "SL": "⚠️ Eksperimentalno — prikazano le, ko je kakovost podatkov zadostna (≥12 opazovanj, ≥90 dni zgodovine). Ni garancija prihodnjih dogodkov.",
+        "BS": "⚠️ Eksperimentalno — prikazuje se samo kada je kvaliteta podataka dovoljna (≥12 opservacija, ≥90 dana historije). Nije garancija budućih događaja.",
+        "SR": "⚠️ Eksperimentalno — prikazuje se samo kada je kvalitet podataka dovoljan (≥12 opservacija, ≥90 dana istorije). Nije garancija budućih događaja.",
+        "MK": "⚠️ Eксперименталнo — прикажано само кога квалитетот на податоци е доволен (≥12 набљудувања, ≥90 дена историја). Не е гаранција за идни настани.",
+        "ME": "⚠️ Eksperimentalno — prikazuje se samo kada je kvalitet podataka dovoljan (≥12 opservacija, ≥90 dana istorije). Nije garancija budućih događaja.",
+    },
+    "exp.tab_kam": {
+        "EN": "Rule-Based Forecast", "HR": "Prognoza temeljena na pravilima", "SL": "Napoved na podlagi pravil",
+        "BS": "Prognoza temeljena na pravilima", "SR": "Prognoza temeljena na pravilima",
+        "MK": "Прогноза заснована на правила", "ME": "Prognoza temeljena na pravilima",
+    },
+    "exp.tab_price": {
+        "EN": "Price Trend Forecast", "HR": "Prognoza cjenovnog trenda", "SL": "Napoved cenovnega trenda",
+        "BS": "Prognoza cjenovnog trenda", "SR": "Prognoza cenovnog trenda",
+        "MK": "Прогноза на ценовен тренд", "ME": "Prognoza cjenovnog trenda",
+    },
+    "exp.no_selection": {
+        "EN": "Select a specific product, retailer and market to run the forecast.",
+        "HR": "Odaberi određeni proizvod, prodavaonicu i tržište za pokretanje prognoze.",
+        "SL": "Izberi določen izdelek, trgovca in trg za zagon napovedi.",
+        "BS": "Odaberi određeni proizvod, prodavnicu i tržište za pokretanje prognoze.",
+        "SR": "Odaberi određeni proizvod, prodavnicu i tržište za pokretanje prognoze.",
+        "MK": "Избери конкретен производ, продавница и пазар за да ја стартуваш прогнозата.",
+        "ME": "Odaberi određeni proizvod, prodavnicu i tržište za pokretanje prognoze.",
     },
 }
 
