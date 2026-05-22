@@ -34,24 +34,64 @@ _FX_TO_EUR: dict[str, float] = {
 # ── Retailer-Normalisierung ───────────────────────────────────────────────────
 
 _RETAILER_ALIASES: dict[str, str] = {
-    "BIPA": "BIPA",
+    # dm drugstore
     "DM": "dm",
     "DM DROGERIE": "dm",
+    "DM DROGERIE MARKT": "dm",
+    # BIPA
+    "BIPA": "BIPA",
+    # Konzum
     "KONZUM": "Konzum",
     "KONZUM SUPER": "Konzum",
+    # Kaufland
     "KAUFLAND": "Kaufland",
+    # Lidl (also country-suffixed variants)
     "LIDL": "Lidl",
     "LIDL HRVATSKA": "Lidl",
+    "LIDL SLOVENIJA": "Lidl",
+    "LIDL SRBIJA": "Lidl",
+    # Spar family
     "SPAR": "Spar",
     "SPAR SUPERMARKET": "Spar",
     "INTERSPAR": "Interspar",
     "EUROSPAR": "Eurospar",
+    # Maxi / Mega Maxi
     "MAXI": "Maxi",
+    "MEGA MAXI": "Maxi",
+    # Vero family (branches in MK)
+    "VERO": "Vero",
+    "VERO 11": "Vero",
+    "VERO 12": "Vero",
+    "VERO 13": "Vero",
+    "VERO - DŽAMBO": "Vero",
+    "VERO DŽAMBO": "Vero",
+    "SUPERVERO": "Vero",
+    # Džambo (Vero format in MK)
+    "DŽAMBO 3 ГЕВГЕЛИЈА": "Vero",
+    "VERO DŽAMBO 2 БИТОЛА": "Vero",
+    # Tinex / Tineks branches (MK)
+    "TINEX": "Tinex",
+    "TINEKS": "Tinex",
+    "TINEKS - KARPOŠ 3": "Tinex",
+    # E.Leclerc
+    "E LECLERC": "E.Leclerc",
+    "E.LECLERC": "E.Leclerc",
+    "E. LECLERC": "E.Leclerc",
+    "E LECLERK": "E.Leclerc",
+    # KTC
+    "KTC": "KTC",
+    # Dis / Super Dis
+    "DIS": "Dis",
+    "SUPER DIS": "Dis",
+    # Oriflame (trailing whitespace variant)
+    "ORIFLAME": "Oriflame",
+    # Ramstore / Ramstorama
+    "RAMSTORE": "Ramstore",
+    "RAMSTORAMA": "Ramstore",
+    # Others
     "RODA": "Roda",
     "IDEA": "Idea",
     "SUPERKITGO": "Superkitgo",
-    "TINEX": "Tinex",
-    "VERO": "Vero",
     "STOKOMAK": "Stokomak",
     "BINGO": "Bingo",
     "VOLI": "Voli",
@@ -60,21 +100,56 @@ _RETAILER_ALIASES: dict[str, str] = {
     "TUŠ": "Tus",
     "TUS": "Tus",
     "JAGER": "Jager",
-    "E.LECLERC": "E.Leclerc",
-    "E. LECLERC": "E.Leclerc",
-    "DIS": "Dis",
+    "GOMEX": "Gomex",
+    "UNIVEREXPORT": "Univerexport",
+    "METRO": "Metro",
+    "HOFER": "Hofer",
+    "EUROSPIN": "Eurospin",
+    "TOMMY": "Tommy",
+    "STUDENAC": "Studenac",
+}
+
+# Reverse map: canonical name → all raw store_name values in the DB
+# Used to expand a filter selection to all DB variants.
+_RETAILER_VARIANTS: dict[str, list[str]] = {}
+for _raw, _canon in _RETAILER_ALIASES.items():
+    _RETAILER_VARIANTS.setdefault(_canon, [])
+    # Store the original-cased raw name as it appears in the DB
+    # (aliases are uppercase keys; we reconstruct title-case for lookup)
+    pass
+
+# Populated at module load from the alias dict (raw keys are uppercase;
+# we need to add the actual DB spellings).
+_DB_RETAILER_VARIANTS: dict[str, list[str]] = {
+    "Vero":      ["Vero", "Vero 11", "Vero 12", "Vero 13",
+                  "Vero - Džambo", "Supervero",
+                  "Džambo 3 ГЕВГЕЛИЈА", "Vero Džambo 2 БИТОЛА"],
+    "Tinex":     ["Tinex", "Tineks - Karpoš 3"],
+    "E.Leclerc": ["E Leclerc", "E.Leclerc", "E. Leclerc"],
+    "Oriflame":  ["Oriflame", "ORIFLAME "],
+    "KTC":       ["KTC", "Ktc"],
+    "Dis":       ["Dis", "Super Dis"],
+    "Maxi":      ["Maxi", "Mega Maxi"],
+    "Ramstore":  ["Ramstore", "Ramstorama"],
+    "dm":        ["DM", "dm"],
 }
 
 
 def normalize_retailer_name(name: str) -> str:
-    """Normiert Händlernamen: strip + Alias-Auflösung für Duplikat-Dedup.
-
-    Beispiel: 'BIPA' und 'bipa' → 'BIPA'; 'Lidl Hrvatska' → 'Lidl'.
-    """
+    """Normalize store name to canonical form for display and deduplication."""
     if not name:
         return ""
     key = name.strip().upper()
     return _RETAILER_ALIASES.get(key, name.strip())
+
+
+def get_store_name_variants(canonical: str) -> list[str]:
+    """Return all raw DB store_name values that map to this canonical name.
+
+    Used to expand a single-select filter to cover all branch/spelling variants.
+    Falls back to [canonical] if no known variants.
+    """
+    return _DB_RETAILER_VARIANTS.get(canonical, [canonical])
 
 
 # Länder-Namen-Map
@@ -206,13 +281,15 @@ def load_promo_history_for_forecast(
 def load_active_promos(
     country_code: str | None = None,
     category_l1: str | None = None,
+    store_name: str | None = None,
     limit: int = 2000,
     allow_mock: bool = True,
 ) -> pd.DataFrame:
     """Currently active promotions: valid_from <= today <= valid_until.
 
-    Returns the full promotion snapshot for the Promo Monitor.
-    Sorted by store_name → category_l1 → brand so table rows cluster naturally.
+    store_name accepts a canonical name (e.g. 'Vero') and automatically
+    expands to all known DB variants ('Vero', 'Vero 12', 'Vero - Džambo', …).
+    Sorted store_name → category_l1 → brand so table rows cluster naturally.
     """
     client = get_client()
     if client is None:
@@ -226,6 +303,12 @@ def load_active_promos(
             q = q.eq("country_code", country_code)
         if category_l1:
             q = q.eq("category_l1", category_l1)
+        if store_name:
+            variants = get_store_name_variants(store_name)
+            if len(variants) > 1:
+                q = q.in_("store_name", variants)
+            else:
+                q = q.eq("store_name", store_name)
         resp = (
             q.order("store_name", desc=False)
             .order("category_l1", desc=False)

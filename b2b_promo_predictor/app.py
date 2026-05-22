@@ -22,6 +22,7 @@ from src.database import (
     get_client,
     get_distinct_categories,
     get_distinct_stores,
+    get_store_name_variants,
     load_active_promos,
     load_promo_history_for_forecast,
     normalize_retailer_name,
@@ -149,7 +150,12 @@ def build_filtered_view(
     audit["after_category"] = len(df)
 
     if retailer and "store_name" in df.columns:
-        df = df[df["store_name"] == retailer]
+        # Expand canonical name to all raw DB variants (e.g. "Vero" → Vero 11/12/13/…)
+        _variants = get_store_name_variants(retailer)
+        if len(_variants) > 1:
+            df = df[df["store_name"].isin(_variants)]
+        else:
+            df = df[df["store_name"] == retailer]
     audit["after_retailer"] = len(df)
 
     if brand_query:
