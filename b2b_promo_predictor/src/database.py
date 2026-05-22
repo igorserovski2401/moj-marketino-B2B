@@ -363,7 +363,9 @@ def load_active_promos(
             df = _filter_branded(df)
         df, _ = run_quality_pipeline(df)
         return df
-    except Exception:
+    except Exception as _exc:
+        import logging
+        logging.warning("load_active_promos error: %r", _exc)
         return _mock_products(50) if allow_mock else pd.DataFrame()
 
 
