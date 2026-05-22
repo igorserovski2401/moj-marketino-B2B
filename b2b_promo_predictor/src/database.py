@@ -298,8 +298,6 @@ def load_promo_history_for_forecast(
     since = (date.today() - timedelta(days=days_back)).isoformat()
     try:
         q = _safe_query(client, "products", _PRODUCT_COLS)
-        if branded_only:
-            q = q.not_.is_("brand", "null")
         if country_code:
             q = q.eq("country_code", country_code)
         if category_l1:
@@ -341,8 +339,6 @@ def load_active_promos(
     try:
         q = _safe_query(client, "products", _PRODUCT_COLS)
         q = q.lte("valid_from", today).gte("valid_until", today)
-        if branded_only:
-            q = q.not_.is_("brand", "null")
         if country_code:
             q = q.eq("country_code", country_code)
         if category_l1:

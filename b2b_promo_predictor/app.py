@@ -405,6 +405,18 @@ with st.sidebar:
     st.divider()
     st.caption(f"© 2026 moj-marketino · Build {APP_VERSION}")
 
+# ── Post-load diagnostic (sidebar, shown after data is loaded) ────────────────
+# Renders after the sidebar block so _active_raw is available.
+def _render_data_diag(raw_df: "pd.DataFrame") -> None:
+    with st.sidebar:
+        n = len(raw_df) if raw_df is not None else 0
+        color = "#059669" if n > 0 else "#DC2626"
+        st.markdown(
+            f"<div style='font-size:.72rem;color:{color};padding:.2rem 0;'>"
+            f"🗄 {n:,} active rows loaded</div>",
+            unsafe_allow_html=True,
+        )
+
 # ── Header ────────────────────────────────────────────────────────────────────
 
 market_label = (
@@ -436,10 +448,12 @@ st.markdown(
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_active(country, cat, branded=True, _v=CACHE_VERSION):
+    # Fetch 5000 rows so after Python-level brand filtering we still have
+    # enough rows (branded products are ~23% of total active SKUs in DB).
     return load_active_promos(
         country_code=country,
         category_l1=cat,
-        limit=2000,
+        limit=5000,
         allow_mock=demo_mode,
         branded_only=branded,
     )
@@ -462,6 +476,8 @@ with st.spinner(t("general.loading", ui_lang)):
     _active_raw           = _load_active(sel_country, sel_cat, branded_only)
     _history_raw          = _load_history(sel_country, sel_cat, branded_only)
     _normalized_retailers = _load_retailers(sel_country)
+
+_render_data_diag(_active_raw)
 
 # Apply brand text-search on top of DB result
 _filtered_promos, _filter_audit = build_filtered_view(
