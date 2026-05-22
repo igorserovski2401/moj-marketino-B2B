@@ -394,6 +394,14 @@ with st.sidebar:
         placeholder="Podravka, Milka, Wudy…",
     )
 
+    show_private_labels = st.checkbox(
+        "Include private labels",
+        value=False,
+        key="show_pl",
+        help="OFF = only FMCG manufacturer brands (default). ON = include Lidl PL, dm, etc.",
+    )
+    branded_only = not show_private_labels
+
     st.divider()
     st.caption(f"© 2026 moj-marketino · Build {APP_VERSION}")
 
@@ -427,19 +435,21 @@ st.markdown(
 # Active promos: valid_from <= today <= valid_until (the real snapshot)
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_active(country, cat, _v=CACHE_VERSION):
+def _load_active(country, cat, branded=True, _v=CACHE_VERSION):
     return load_active_promos(
         country_code=country,
         category_l1=cat,
         limit=2000,
         allow_mock=demo_mode,
+        branded_only=branded,
     )
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_history(country, cat, _v=CACHE_VERSION):
+def _load_history(country, cat, branded=True, _v=CACHE_VERSION):
     return load_promo_history_for_forecast(
         country_code=country, category_l1=cat, days_back=365, limit=5000,
+        branded_only=branded,
     )
 
 
@@ -449,8 +459,8 @@ def _load_retailers(country, _v=CACHE_VERSION):
 
 
 with st.spinner(t("general.loading", ui_lang)):
-    _active_raw           = _load_active(sel_country, sel_cat)
-    _history_raw          = _load_history(sel_country, sel_cat)
+    _active_raw           = _load_active(sel_country, sel_cat, branded_only)
+    _history_raw          = _load_history(sel_country, sel_cat, branded_only)
     _normalized_retailers = _load_retailers(sel_country)
 
 # Apply brand text-search on top of DB result

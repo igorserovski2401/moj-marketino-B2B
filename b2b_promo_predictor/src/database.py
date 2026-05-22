@@ -134,6 +134,39 @@ _DB_RETAILER_VARIANTS: dict[str, list[str]] = {
     "dm":        ["DM", "dm"],
 }
 
+# ── Brand filtering ───────────────────────────────────────────────────────────
+
+_BRAND_NULL_PLACEHOLDERS: frozenset[str] = frozenset({"", "-", "—", "N/A", "n/a", "null"})
+
+_PRIVATE_LABEL_BRANDS: frozenset[str] = frozenset({
+    # Lidl private labels (400k+ rows in DB, appear at exactly 1 retailer)
+    "Deluxe", "Italiamo", "Vitasia", "Milbona", "Cien", "Pilos", "W5",
+    "Gelatelli", "Chef Select", "Eridanous", "Sondey", "Kania", "Pikok",
+    "Vemondo", "Sol&Mar", "Alpenfest", "Snack Day", "Solevita", "Belbake",
+    "Duc de Coeur", "MCENNEDY", "Freshona", "Bellarom", "Crownfield",
+    "Mister Choc", "Lupilu", "Favorina", "Alesto", "Tastino", "Bon Gelati",
+    "Floralys", "Sweet Corner", "Grillmeister", "Dulano", "Fin Carré",
+    "1001 delights", "Okusi zavičaja",
+    # dm private label
+    "Dm",
+    # Store section labels (not actual brands)
+    "Naša mesnica",
+})
+
+_PRIVATE_LABEL_BRANDS_LOWER: frozenset[str] = frozenset(
+    b.lower() for b in _PRIVATE_LABEL_BRANDS
+)
+
+
+def _filter_branded(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only rows with a real manufacturer brand (non-null, non-PL)."""
+    if "brand" not in df.columns or df.empty:
+        return df
+    brand_col = df["brand"].fillna("").str.strip()
+    mask = (brand_col.str.len() > 0) & ~brand_col.isin(_BRAND_NULL_PLACEHOLDERS)
+    mask = mask & ~brand_col.str.lower().isin(_PRIVATE_LABEL_BRANDS_LOWER)
+    return df[mask]
+
 
 def normalize_retailer_name(name: str) -> str:
     """Normalize store name to canonical form for display and deduplication."""
@@ -249,12 +282,14 @@ def load_promo_history_for_forecast(
     category_l1: str | None = None,
     days_back: int = 365,
     limit: int = 5000,
+    branded_only: bool = True,
 ) -> pd.DataFrame:
     """Lädt historische + aktuelle Aktionen für die Forecast-Berechnung.
 
     Anders als `load_products` wird kein Sortier-/Anzeige-Limit auf wenige
     aktuelle Datensätze gelegt – die ganze 12-Monats-Historie ist nötig
     damit Aktionszyklen und Preistrends berechnet werden können.
+    When branded_only=True (default), excludes unbranded and private-label rows.
     """
     client = get_client()
     if client is None:
@@ -263,6 +298,8 @@ def load_promo_history_for_forecast(
     since = (date.today() - timedelta(days=days_back)).isoformat()
     try:
         q = _safe_query(client, "products", _PRODUCT_COLS)
+        if branded_only:
+            q = q.not_.is_("brand", "null").neq("brand", "").neq("brand", "-")
         if country_code:
             q = q.eq("country_code", country_code)
         if category_l1:
@@ -272,6 +309,8 @@ def load_promo_history_for_forecast(
         if not resp.data:
             return pd.DataFrame()
         df = _normalize(pd.DataFrame(resp.data))
+        if branded_only:
+            df = _filter_branded(df)
         df, _ = run_quality_pipeline(df)
         return df
     except Exception:
@@ -284,12 +323,15 @@ def load_active_promos(
     store_name: str | None = None,
     limit: int = 2000,
     allow_mock: bool = True,
+    branded_only: bool = True,
 ) -> pd.DataFrame:
     """Currently active promotions: valid_from <= today <= valid_until.
 
     store_name accepts a canonical name (e.g. 'Vero') and automatically
     expands to all known DB variants ('Vero', 'Vero 12', 'Vero - Džambo', …).
     Sorted store_name → category_l1 → brand so table rows cluster naturally.
+    When branded_only=True (default), filters out unbranded and private-label
+    products so only FMCG manufacturer brands are returned.
     """
     client = get_client()
     if client is None:
@@ -299,6 +341,8 @@ def load_active_promos(
     try:
         q = _safe_query(client, "products", _PRODUCT_COLS)
         q = q.lte("valid_from", today).gte("valid_until", today)
+        if branded_only:
+            q = q.not_.is_("brand", "null").neq("brand", "").neq("brand", "-")
         if country_code:
             q = q.eq("country_code", country_code)
         if category_l1:
@@ -319,6 +363,8 @@ def load_active_promos(
         if not resp.data:
             return _mock_products(50) if allow_mock else pd.DataFrame()
         df = _normalize(pd.DataFrame(resp.data))
+        if branded_only:
+            df = _filter_branded(df)
         df, _ = run_quality_pipeline(df)
         return df
     except Exception:
