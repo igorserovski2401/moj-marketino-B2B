@@ -448,12 +448,10 @@ st.markdown(
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_active(country, cat, branded=True, _v=CACHE_VERSION):
-    # Fetch 5000 rows so after Python-level brand filtering we still have
-    # enough rows (branded products are ~23% of total active SKUs in DB).
     return load_active_promos(
         country_code=country,
         category_l1=cat,
-        limit=5000,
+        limit=2000,
         allow_mock=demo_mode,
         branded_only=branded,
     )

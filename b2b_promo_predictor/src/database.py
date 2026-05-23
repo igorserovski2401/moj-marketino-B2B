@@ -352,8 +352,7 @@ def load_active_promos(
         resp = (
             q.order("store_name", desc=False)
             .order("category_l1", desc=False)
-            .order("brand", desc=False)
-            .limit(limit)
+            .limit(2000)
             .execute()
         )
         if not resp.data:
@@ -361,6 +360,10 @@ def load_active_promos(
         df = _normalize(pd.DataFrame(resp.data))
         if branded_only:
             df = _filter_branded(df)
+        # Sort in Python so brand-rich results cluster together
+        sort_cols = [c for c in ["store_name", "category_l1", "brand"] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols, na_position="last")
         df, _ = run_quality_pipeline(df)
         return df
     except Exception as _exc:
